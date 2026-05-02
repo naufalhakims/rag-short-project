@@ -1,10 +1,3 @@
-"""
-Personal Pocket Librarian — FastAPI Entry Point
-
-A production-ready RAG API that lets users upload documents,
-store them in a vector database, and query them with streaming AI responses.
-"""
-
 import json
 import traceback
 from contextlib import asynccontextmanager
@@ -33,7 +26,7 @@ from schemas.models import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup / shutdown lifecycle."""
+    # Startup / shutdown lifecycle.
     logger.info("Starting Personal Pocket Librarian…")
     await init_db()
     # Warm up the vector store (triggers embedding model download on first run)
@@ -66,7 +59,7 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all for unhandled exceptions — log and return a clean JSON error."""
+    # Catch-all for unhandled exceptions — log and return a clean JSON error.
     logger.error(
         "Unhandled exception on %s %s: %s\n%s",
         request.method,
@@ -84,7 +77,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def serve_frontend():
-    """Serve the single-page frontend."""
+    # Serve the single-page frontend.
     with open("static/index.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -96,7 +89,7 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".markdown", ".text"}
 
 @app.post("/api/upload", response_model=UploadResponse, tags=["Documents"])
 async def upload_document(file: UploadFile = File(...)):
-    """Upload a text or markdown file for ingestion into the vector store."""
+    #Upload a text or markdown file for ingestion into the vector store.
 
     # Validate extension
     filename = file.filename or "unknown.txt"
@@ -131,10 +124,8 @@ async def upload_document(file: UploadFile = File(...)):
 
 @app.post("/api/chat", tags=["Chat"])
 async def chat(request: ChatRequest):
-    """
-    Ask a question against the uploaded documents.
-    Returns a Server-Sent Events stream of tokens.
-    """
+    # Ask a question against the uploaded documents.
+    # Returns a Server-Sent Events stream of tokens.
     # Ensure we have documents
     docs = list_documents()
     if not docs:
@@ -200,14 +191,14 @@ async def chat(request: ChatRequest):
 
 @app.get("/api/history", response_model=list[SessionResponse], tags=["History"])
 async def get_history():
-    """List all chat sessions."""
+    # List all chat sessions.
     sessions = await get_all_sessions()
     return sessions
 
 
 @app.get("/api/history/{session_id}", response_model=list[MessageResponse], tags=["History"])
 async def get_session_history(session_id: str):
-    """Get all messages for a specific chat session."""
+    # Get all messages for a specific chat session.
     messages = await get_session_messages(session_id)
     if not messages:
         raise HTTPException(status_code=404, detail="Session not found or has no messages.")
@@ -218,13 +209,13 @@ async def get_session_history(session_id: str):
 
 @app.get("/api/documents", response_model=list[DocumentInfo], tags=["Documents"])
 async def get_documents():
-    """List all uploaded documents and their chunk counts."""
+    # List all uploaded documents and their chunk counts.
     return list_documents()
 
 
 @app.delete("/api/documents/{filename}", tags=["Documents"])
 async def remove_document(filename: str):
-    """Remove a document and all its chunks from the vector store."""
+    # Remove a document and all its chunks from the vector store.
     deleted = delete_document(filename)
     if deleted == 0:
         raise HTTPException(status_code=404, detail=f"Document '{filename}' not found.")

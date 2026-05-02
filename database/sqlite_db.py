@@ -1,8 +1,5 @@
-"""
-SQLite database for persisting chat history (sessions + messages).
-Uses aiosqlite for async compatibility with FastAPI.
-"""
-
+# SQLite database for persisting chat history (sessions + messages).
+# Uses aiosqlite for async compatibility with FastAPI.
 import aiosqlite
 import uuid
 from datetime import datetime, timezone
@@ -15,7 +12,7 @@ DB_PATH = settings.SQLITE_DB_PATH
 
 
 async def init_db() -> None:
-    """Create the chat history tables if they don't exist."""
+    # Create the chat history tables if they don't exist.
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
@@ -45,7 +42,7 @@ async def init_db() -> None:
 
 
 async def create_session(title: str) -> dict:
-    """Create a new chat session and return its metadata."""
+    # Create a new chat session and return its metadata.
     session_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
@@ -59,7 +56,7 @@ async def create_session(title: str) -> dict:
 
 
 async def get_all_sessions() -> list[dict]:
-    """Return all chat sessions ordered by most recent."""
+    # Return all chat sessions ordered by most recent.
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -70,7 +67,7 @@ async def get_all_sessions() -> list[dict]:
 
 
 async def get_session_messages(session_id: str) -> list[dict]:
-    """Return all messages for a given session."""
+    # Return all messages for a given session.
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -87,7 +84,7 @@ async def save_message(
     content: str,
     sources: Optional[str] = None,
 ) -> dict:
-    """Persist a single chat message and update the session timestamp."""
+    # Persist a single chat message and update the session timestamp.
     message_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
     async with aiosqlite.connect(DB_PATH) as db:

@@ -1,7 +1,4 @@
-"""
-Vector Store Service — handles document ingestion, chunking, and retrieval via ChromaDB.
-"""
-
+# Vector Store Service — handles document ingestion, chunking, and retrieval via ChromaDB.
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
@@ -24,7 +21,7 @@ _text_splitter = RecursiveCharacterTextSplitter(
 
 
 def get_embeddings() -> HuggingFaceEmbeddings:
-    """Lazily initialise the embedding model (downloads on first call)."""
+    # Lazily initialise the embedding model (downloads on first call).
     global _embeddings
     if _embeddings is None:
         logger.info("Loading embedding model: %s ...", settings.EMBEDDING_MODEL)
@@ -38,7 +35,7 @@ def get_embeddings() -> HuggingFaceEmbeddings:
 
 
 def get_vector_store() -> Chroma:
-    """Return the persistent ChromaDB vector store (creates it if needed)."""
+    # Return the persistent ChromaDB vector store (creates it if needed).
     global _vector_store
     if _vector_store is None:
         logger.info(
@@ -56,11 +53,8 @@ def get_vector_store() -> Chroma:
 
 
 def ingest_document(filename: str, content: str) -> int:
-    """
-    Split a document into chunks and add them to the vector store.
-
-    Returns the number of chunks created.
-    """
+    # Split a document into chunks and add them to the vector store.
+    # Returns the number of chunks created.  
     logger.info("Ingesting document: %s (%d characters)", filename, len(content))
 
     documents = [
@@ -77,9 +71,9 @@ def ingest_document(filename: str, content: str) -> int:
 
 
 def retrieve_context(query: str, k: int = 4) -> list[Document]:
-    """
-    Retrieve the top-k most relevant chunks for a given query.
-    """
+    
+    # Retrieve the top-k most relevant chunks for a given query.
+    
     store = get_vector_store()
     results = store.similarity_search(query, k=k)
     logger.info(
@@ -92,7 +86,7 @@ def retrieve_context(query: str, k: int = 4) -> list[Document]:
 
 
 def list_documents() -> list[dict]:
-    """List all unique documents and their chunk counts."""
+    # List all unique documents and their chunk counts.
     store = get_vector_store()
     collection = store._collection
     all_meta = collection.get()["metadatas"]
@@ -109,10 +103,8 @@ def list_documents() -> list[dict]:
 
 
 def delete_document(filename: str) -> int:
-    """
-    Remove all chunks belonging to a specific document.
-    Returns the number of chunks deleted.
-    """
+    # Remove all chunks belonging to a specific document.
+    # Returns the number of chunks deleted.
     store = get_vector_store()
     collection = store._collection
 

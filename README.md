@@ -29,7 +29,7 @@ FastAPI app
   main.py
         |
         +-- config.py
-        |     Loads .env values and optional Groq-API.txt fallback
+        |     Loads .env values
         |
         +-- services/vector_service.py
         |     Splits documents, creates embeddings, stores/retrieves Chroma vectors

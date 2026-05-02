@@ -1,7 +1,4 @@
-"""
-Pydantic models for API request/response validation.
-"""
-
+# Pydantic models for API request/response validation.
 from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
@@ -10,7 +7,7 @@ from datetime import datetime
 # ── Request Models ──────────────────────────────────────────────
 
 class ChatRequest(BaseModel):
-    """Incoming chat query from the user."""
+    # Incoming chat query from the user.
 
     question: str = Field(..., min_length=1, max_length=2000, description="The user's question")
     session_id: Optional[str] = Field(None, description="Existing session ID to continue a conversation")
@@ -19,7 +16,7 @@ class ChatRequest(BaseModel):
 # ── Response Models ─────────────────────────────────────────────
 
 class UploadResponse(BaseModel):
-    """Response after a successful file upload."""
+    # Response after a successful file upload.
 
     filename: str
     chunks_created: int
@@ -27,7 +24,7 @@ class UploadResponse(BaseModel):
 
 
 class SessionResponse(BaseModel):
-    """Metadata for a single chat session."""
+    # Metadata for a single chat session.
 
     id: str
     title: str
@@ -36,7 +33,7 @@ class SessionResponse(BaseModel):
 
 
 class MessageResponse(BaseModel):
-    """A single chat message."""
+    # A single chat message.
 
     id: str
     session_id: str
@@ -47,14 +44,14 @@ class MessageResponse(BaseModel):
 
 
 class DocumentInfo(BaseModel):
-    """Information about an uploaded document."""
+    # Information about an uploaded document.
 
     filename: str
     chunk_count: int
 
 
 class ErrorResponse(BaseModel):
-    """Standard error envelope."""
+    # Standard error envelope.
 
     detail: str
     status_code: int

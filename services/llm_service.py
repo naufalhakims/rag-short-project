@@ -1,7 +1,4 @@
-"""
-LLM Service - Groq-based RAG chain with streaming support.
-"""
-
+# LLM Service - Groq-based RAG chain with streaming support.
 import json
 from typing import AsyncGenerator
 
@@ -38,7 +35,7 @@ _llm: ChatGroq | None = None
 
 
 def get_llm() -> ChatGroq:
-    """Lazily initialise the Groq LLM."""
+    # Lazily initialise the Groq LLM.
     global _llm
     if _llm is None:
         logger.info("Initializing Groq LLM: %s", settings.GROQ_MODEL)
@@ -53,7 +50,7 @@ def get_llm() -> ChatGroq:
 
 
 def _format_context(docs: list[Document]) -> str:
-    """Combine retrieved document chunks into a single context string."""
+    # Combine retrieved document chunks into a single context string.
     parts = []
     for i, doc in enumerate(docs, 1):
         source = doc.metadata.get("source", "unknown")
@@ -62,7 +59,7 @@ def _format_context(docs: list[Document]) -> str:
 
 
 def _extract_sources(docs: list[Document]) -> list[str]:
-    """Return deduplicated source filenames."""
+    # Return deduplicated source filenames.
     return list({doc.metadata.get("source", "unknown") for doc in docs})
 
 
