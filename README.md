@@ -122,3 +122,6 @@ The embedding model may download the first time the app starts.
 - `POST /api/chat` streams a RAG answer for a question.
 - `GET /api/history` lists chat sessions.
 - `GET /api/history/{session_id}` loads messages for a session.
+
+## Documentation
+<img width="2880" height="1800" alt="Screenshot (37)" src="https://github.com/user-attachments/assets/cdce0c18-ed3b-4558-874a-d298916c65fd" />
