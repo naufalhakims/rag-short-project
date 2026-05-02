@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Personal Pocket Librarian</title>
+    <meta name="description" content="Upload documents and ask grounded questions against your personal library." />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        accent: {
+                            50: '#fff7ed',
+                            100: '#ffedd5',
+                            200: '#fed7aa',
+                            300: '#fdba74',
+                            400: '#fb923c',
+                            500: '#f97316',
+                            600: '#ea580c',
+                            700: '#c2410c',
+                            800: '#9a3412',
+                            900: '#7c2d12',
+                        },
+                        shell: {
+                            900: '#0d0d0f',
+                            850: '#131316',
+                            800: '#18181b',
+                            750: '#1f1f23',
+                            700: '#27272a',
+                        },
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        :root {
+            color-scheme: dark;
+            --border-soft: rgba(255, 255, 255, 0.08);
+            --border-strong: rgba(249, 115, 22, 0.32);
+        }
+
+        * { scrollbar-width: thin; scrollbar-color: #52525b #18181b; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #18181b; }
+        ::-webkit-scrollbar-thumb { background: #52525b; border-radius: 999px; border: 2px solid #18181b; }
+        ::-webkit-scrollbar-thumb:hover { background: #71717a; }
+
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes typingBounce {
+            0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+            40% { transform: translateY(-4px); opacity: 1; }
+        }
+
+        .animate-fade-in-up { animation: fadeInUp 0.22s ease-out both; }
+
+        .typing-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 999px;
+            background: #fb923c;
+            animation: typingBounce 1.2s infinite ease-in-out both;
+        }
+        .typing-dot:nth-child(2) { animation-delay: 0.14s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.28s; }
+
+        .drop-zone-active {
+            border-color: #f97316 !important;
+            background: rgba(249, 115, 22, 0.08) !important;
+        }
+
+        .prose-chat p { margin-bottom: 0.65rem; }
+        .prose-chat p:last-child { margin-bottom: 0; }
+        .prose-chat ul, .prose-chat ol { margin: 0.5rem 0 0.65rem 1.25rem; }
+        .prose-chat li { margin: 0.2rem 0; }
+        .prose-chat strong { color: #fafafa; font-weight: 650; }
+        .prose-chat code {
+            background: rgba(249, 115, 22, 0.12);
+            color: #fed7aa;
+            padding: 0.12rem 0.35rem;
+            border-radius: 6px;
+            font-size: 0.9em;
+        }
+        .prose-chat pre {
+            background: #0d0d0f;
+            border: 1px solid var(--border-soft);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 0.75rem 0;
+        }
+        .prose-chat pre code { background: transparent; padding: 0; color: #e4e4e7; }
+
+        .icon-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body class="bg-shell-900 text-zinc-100 font-sans min-h-screen overflow-hidden">
+    <div class="flex h-screen w-full">
+        <div id="mobile-backdrop" class="fixed inset-0 z-30 hidden bg-black/60 lg:hidden" onclick="toggleSidebar(false)"></div>
+
+        <aside id="sidebar" class="fixed inset-y-0 left-0 z-40 flex w-[312px] -translate-x-full flex-col border-r border-white/10 bg-shell-850 transition-transform duration-200 lg:static lg:translate-x-0">
+            <div class="flex h-16 items-center gap-3 border-b border-white/10 px-4">
+                <div class="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-600 text-white shadow-lg shadow-accent-900/30">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                </div>
+                <div class="min-w-0">
+                    <h1 class="truncate text-sm font-semibold text-zinc-50">Pocket Librarian</h1>
+                    <p class="text-xs text-zinc-500">Document-grounded AI</p>
+                </div>
+                <button class="icon-btn ml-auto text-zinc-400 hover:bg-white/5 hover:text-zinc-100 lg:hidden" onclick="toggleSidebar(false)" aria-label="Close sidebar">
+                    <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18 18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+
+            <div class="p-3">
+                <button onclick="startNewChat()" class="flex h-11 w-full items-center justify-center gap-2 rounded-lg border border-accent-500/40 bg-accent-600 px-3 text-sm font-semibold text-white shadow-sm shadow-accent-950/30 transition hover:bg-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/50">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m-7-7h14"/></svg>
+                    New chat
+                </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto px-3 pb-3">
+                <section class="mb-5">
+                    <div class="mb-2 flex items-center justify-between px-1">
+                        <h2 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Chats</h2>
+                        <button onclick="refreshHistory()" class="rounded-md p-1.5 text-zinc-500 hover:bg-white/5 hover:text-zinc-200" title="Refresh chats" aria-label="Refresh chats">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M5.64 18.36A9 9 0 0 0 18.36 5.64M18.36 5.64H14m4.36 0V10"/></svg>
+                        </button>
+                    </div>
+                    <div id="history-list" class="space-y-1">
+                        <p class="px-2 py-2 text-sm text-zinc-500">No conversations yet.</p>
+                    </div>
+                </section>
+
+                <section class="mb-5">
+                    <div class="mb-2 flex items-center justify-between px-1">
+                        <h2 class="text-xs font-semibold uppercase tracking-wide text-zinc-500">Documents</h2>
+                        <button onclick="refreshDocuments()" class="rounded-md p-1.5 text-zinc-500 hover:bg-white/5 hover:text-zinc-200" title="Refresh documents" aria-label="Refresh documents">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M5.64 18.36A9 9 0 0 0 18.36 5.64M18.36 5.64H14m4.36 0V10"/></svg>
+                        </button>
+                    </div>
+                    <div id="documents-list" class="space-y-1">
+                        <p class="px-2 py-2 text-sm text-zinc-500">No documents yet.</p>
+                    </div>
+                </section>
+            </div>
+
+            <div class="border-t border-white/10 p-3">
+                <div id="drop-zone"
+                     class="cursor-pointer rounded-lg border border-dashed border-zinc-700 bg-shell-800 p-4 transition hover:border-accent-500/70 hover:bg-accent-500/5"
+                     ondragover="event.preventDefault(); this.classList.add('drop-zone-active')"
+                     ondragleave="this.classList.remove('drop-zone-active')"
+                     ondrop="handleDrop(event)"
+                     onclick="document.getElementById('file-input').click()">
+                    <input id="file-input" type="file" accept=".txt,.md,.markdown,.text" multiple class="hidden" onchange="handleFiles(this.files)" />
+                    <div class="flex items-start gap-3">
+                        <div class="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-zinc-700/70 text-accent-300">
+                            <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 16V4m0 0 4 4m-4-4-4 4M4 16.5V19a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2.5"/></svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-sm font-medium text-zinc-200">Upload files</p>
+                            <p class="mt-0.5 text-xs leading-5 text-zinc-500">Drop or browse .txt and .md documents.</p>
+                        </div>
+                    </div>
+                </div>
+                <div id="upload-status" class="mt-3 space-y-2"></div>
+            </div>
+        </aside>
+
+        <main class="flex min-w-0 flex-1 flex-col bg-shell-900">
+            <header class="flex h-16 items-center justify-between border-b border-white/10 bg-shell-900/90 px-4 backdrop-blur">
+                <div class="flex items-center gap-3">
+                    <button class="icon-btn text-zinc-400 hover:bg-white/5 hover:text-zinc-100 lg:hidden" onclick="toggleSidebar(true)" aria-label="Open sidebar">
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+                    </button>
+                    <div>
+                        <p id="chat-title" class="text-sm font-semibold text-zinc-100">New chat</p>
+                        <p class="text-xs text-zinc-500">Answers use your uploaded documents only</p>
+                    </div>
+                </div>
+                <div id="status-badge" class="flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300">
+                    <span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+                    Online
+                </div>
+            </header>
+
+            <div id="chat-messages" class="flex-1 overflow-y-auto">
+                <div id="welcome-screen" class="mx-auto flex min-h-full max-w-3xl flex-col justify-center px-5 py-12 text-center animate-fade-in-up">
+                    <div class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-xl border border-accent-500/30 bg-accent-500/10 text-accent-300">
+                        <svg class="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 6 2.2-4.8A8 8 0 1 1 12 20H4Z"/></svg>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">Ask your library anything.</h2>
+                    <p class="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400">
+                        Upload a text or markdown document, then start a focused conversation with answers grounded in your files.
+                    </p>
+                    <div class="mt-8 grid gap-3 text-left sm:grid-cols-3">
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('Summarize the main ideas in my uploaded documents.')">
+                            <span class="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-accent-500/10 text-accent-300">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h7"/></svg>
+                            </span>
+                            <span class="block text-sm font-medium text-zinc-100">Summarize</span>
+                            <span class="mt-1 block text-xs leading-5 text-zinc-500">Get the core points quickly.</span>
+                        </button>
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('What are the most important facts, dates, or decisions in these files?')">
+                            <span class="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-accent-500/10 text-accent-300">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6M8 4h8l2 2v14H6V6l2-2Z"/></svg>
+                            </span>
+                            <span class="block text-sm font-medium text-zinc-100">Extract facts</span>
+                            <span class="mt-1 block text-xs leading-5 text-zinc-500">Find details worth keeping.</span>
+                        </button>
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('Compare the uploaded documents and explain where they agree or differ.')">
+                            <span class="mb-3 flex h-8 w-8 items-center justify-center rounded-md bg-accent-500/10 text-accent-300">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01"/></svg>
+                            </span>
+                            <span class="block text-sm font-medium text-zinc-100">Compare</span>
+                            <span class="mt-1 block text-xs leading-5 text-zinc-500">See overlap and differences.</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="border-t border-white/10 bg-shell-900 px-4 py-4">
+                <form id="chat-form" class="mx-auto flex max-w-3xl items-end gap-2 rounded-xl border border-white/10 bg-shell-800 p-2 shadow-2xl shadow-black/20 focus-within:border-accent-500/50" onsubmit="handleSubmit(event)">
+                    <input
+                        id="chat-input"
+                        type="text"
+                        placeholder="Message Pocket Librarian..."
+                        autocomplete="off"
+                        class="min-h-10 flex-1 bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none"
+                    />
+                    <button
+                        id="send-btn"
+                        type="submit"
+                        class="icon-btn shrink-0 bg-accent-600 text-white transition hover:bg-accent-500 focus:outline-none focus:ring-2 focus:ring-accent-500/50 disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-500"
+                        aria-label="Send message"
+                    >
+                        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14m0 0-5-5m5 5-5 5"/></svg>
+                    </button>
+                </form>
+                <p class="mt-2 text-center text-xs text-zinc-600">Pocket Librarian can make mistakes. Verify important details against your source files.</p>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const API = '';
+        let currentSessionId = null;
+        let isStreaming = false;
+
+        function toggleSidebar(forceOpen) {
+            const sidebar = document.getElementById('sidebar');
+            const backdrop = document.getElementById('mobile-backdrop');
+            const shouldOpen = typeof forceOpen === 'boolean'
+                ? forceOpen
+                : sidebar.classList.contains('-translate-x-full');
+
+            sidebar.classList.toggle('-translate-x-full', !shouldOpen);
+            backdrop.classList.toggle('hidden', !shouldOpen);
+        }
+
+        function startNewChat() {
+            currentSessionId = null;
+            isStreaming = false;
+            document.getElementById('chat-title').textContent = 'New chat';
+            document.getElementById('chat-input').value = '';
+            document.getElementById('chat-messages').innerHTML = welcomeMarkup();
+            updateSendButton();
+            refreshHistory();
+            toggleSidebar(false);
+            setTimeout(() => document.getElementById('chat-input').focus(), 0);
+        }
+
+        function welcomeMarkup() {
+            return `
+                <div id="welcome-screen" class="mx-auto flex min-h-full max-w-3xl flex-col justify-center px-5 py-12 text-center animate-fade-in-up">
+                    <div class="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-xl border border-accent-500/30 bg-accent-500/10 text-accent-300">
+                        <svg class="h-7 w-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 6 2.2-4.8A8 8 0 1 1 12 20H4Z"/></svg>
+                    </div>
+                    <h2 class="text-2xl font-semibold tracking-normal text-zinc-50 sm:text-3xl">Ask your library anything.</h2>
+                    <p class="mx-auto mt-3 max-w-xl text-sm leading-6 text-zinc-400">Upload a text or markdown document, then start a focused conversation with answers grounded in your files.</p>
+                    <div class="mt-8 grid gap-3 text-left sm:grid-cols-3">
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('Summarize the main ideas in my uploaded documents.')"><span class="block text-sm font-medium text-zinc-100">Summarize</span><span class="mt-1 block text-xs leading-5 text-zinc-500">Get the core points quickly.</span></button>
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('What are the most important facts, dates, or decisions in these files?')"><span class="block text-sm font-medium text-zinc-100">Extract facts</span><span class="mt-1 block text-xs leading-5 text-zinc-500">Find details worth keeping.</span></button>
+                        <button class="rounded-lg border border-white/10 bg-shell-800 p-4 text-left transition hover:border-accent-500/40 hover:bg-shell-750" onclick="usePrompt('Compare the uploaded documents and explain where they agree or differ.')"><span class="block text-sm font-medium text-zinc-100">Compare</span><span class="mt-1 block text-xs leading-5 text-zinc-500">See overlap and differences.</span></button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function usePrompt(prompt) {
+            const input = document.getElementById('chat-input');
+            input.value = prompt;
+            input.focus();
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drop-zone-active');
+            handleFiles(e.dataTransfer.files);
+        }
+
+        async function handleFiles(files) {
+            const statusEl = document.getElementById('upload-status');
+            for (const file of files) {
+                const id = 'upload-' + Date.now() + Math.random().toString(16).slice(2);
+                statusEl.insertAdjacentHTML('beforeend', `
+                    <div id="${id}" class="flex items-center gap-2 rounded-lg border border-accent-500/20 bg-accent-500/10 p-2 text-sm animate-fade-in-up">
+                        <div class="h-4 w-4 animate-spin rounded-full border-2 border-accent-400 border-t-transparent"></div>
+                        <span class="min-w-0 flex-1 truncate text-zinc-300">${escapeHtml(file.name)}</span>
+                    </div>`);
+
+                const form = new FormData();
+                form.append('file', file);
+
+                try {
+                    const res = await fetch(`${API}/api/upload`, { method: 'POST', body: form });
+                    const data = await res.json();
+                    const el = document.getElementById(id);
+
+                    if (res.ok) {
+                        el.className = 'flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-2 text-sm animate-fade-in-up';
+                        el.innerHTML = `<span class="text-emerald-300">Done</span><span class="min-w-0 flex-1 truncate text-zinc-300">${escapeHtml(file.name)}</span><span class="text-xs text-emerald-300">${data.chunks_created} chunks</span>`;
+                    } else {
+                        el.className = 'flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-sm';
+                        el.innerHTML = `<span class="min-w-0 flex-1 truncate text-red-300">${escapeHtml(data.detail || 'Upload failed')}</span>`;
+                    }
+                } catch (err) {
+                    const el = document.getElementById(id);
+                    el.className = 'flex items-center gap-2 rounded-lg border border-red-500/20 bg-red-500/10 p-2 text-sm';
+                    el.innerHTML = `<span class="min-w-0 truncate text-red-300">${escapeHtml(err.message)}</span>`;
+                }
+            }
+            refreshDocuments();
+        }
+
+        async function refreshDocuments() {
+            try {
+                const res = await fetch(`${API}/api/documents`);
+                const docs = await res.json();
+                const el = document.getElementById('documents-list');
+
+                if (!docs.length) {
+                    el.innerHTML = '<p class="px-2 py-2 text-sm text-zinc-500">No documents yet.</p>';
+                    return;
+                }
+
+                el.innerHTML = docs.map(d => {
+                    const filename = escapeHtml(d.filename);
+                    return `
+                        <div class="group flex items-center gap-2 rounded-lg px-2 py-2 transition hover:bg-white/5">
+                            <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-zinc-800 text-zinc-400">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 4h8l2 2v14H6V6l2-2Z"/></svg>
+                            </span>
+                            <div class="min-w-0 flex-1">
+                                <p class="truncate text-sm text-zinc-300">${filename}</p>
+                                <p class="text-xs text-zinc-600">${d.chunk_count} chunks</p>
+                            </div>
+                            <button data-filename="${filename}" onclick="deleteDocument(this.dataset.filename)" class="rounded-md p-1.5 text-zinc-600 opacity-0 transition hover:bg-red-500/10 hover:text-red-300 group-hover:opacity-100" title="Delete document" aria-label="Delete ${filename}">
+                                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m19 7-.86 12.14A2 2 0 0 1 16.15 21h-8.3a2 2 0 0 1-1.99-1.86L5 7m5 4v6m4-6v6M4 7h16m-5 0V4H9v3"/></svg>
+                            </button>
+                        </div>
+                    `;
+                }).join('');
+            } catch (err) {
+                console.error('Failed to load documents:', err);
+            }
+        }
+
+        async function deleteDocument(filename) {
+            if (!confirm(`Delete "${filename}" and all its chunks?`)) return;
+            try {
+                await fetch(`${API}/api/documents/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                refreshDocuments();
+            } catch (err) {
+                console.error('Delete failed:', err);
+            }
+        }
+
+        async function refreshHistory() {
+            try {
+                const res = await fetch(`${API}/api/history`);
+                const sessions = await res.json();
+                const el = document.getElementById('history-list');
+
+                if (!sessions.length) {
+                    el.innerHTML = '<p class="px-2 py-2 text-sm text-zinc-500">No conversations yet.</p>';
+                    return;
+                }
+
+                el.innerHTML = sessions.slice(0, 20).map(s => `
+                    <button onclick="loadSession('${escapeJs(s.id)}')"
+                            class="group flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition hover:bg-white/5 ${currentSessionId === s.id ? 'border border-accent-500/30 bg-accent-500/10' : 'border border-transparent'}">
+                        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-md ${currentSessionId === s.id ? 'bg-accent-500/15 text-accent-300' : 'bg-zinc-800 text-zinc-500'}">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h4m-8 6 2-4.5A8 8 0 1 1 12 20H4Z"/></svg>
+                        </span>
+                        <span class="min-w-0 flex-1">
+                            <span class="block truncate text-sm text-zinc-300">${escapeHtml(s.title || 'Untitled chat')}</span>
+                            <span class="block text-xs text-zinc-600">${formatDate(s.updated_at || s.created_at)}</span>
+                        </span>
+                    </button>
+                `).join('');
+            } catch (err) {
+                console.error('Failed to load history:', err);
+            }
+        }
+
+        async function loadSession(sessionId) {
+            try {
+                currentSessionId = sessionId;
+                const res = await fetch(`${API}/api/history/${sessionId}`);
+                const messages = await res.json();
+                const chat = document.getElementById('chat-messages');
+                chat.innerHTML = '<div class="mx-auto max-w-3xl px-4 py-8 sm:px-6"></div>';
+                const stream = chat.firstElementChild;
+
+                messages.forEach((m, index) => {
+                    appendMessage(m.role, m.content, m.sources ? JSON.parse(m.sources) : null, false, stream);
+                    if (index === 0 && m.role === 'user') {
+                        document.getElementById('chat-title').textContent = m.content.slice(0, 52) || 'Chat';
+                    }
+                });
+                refreshHistory();
+                toggleSidebar(false);
+            } catch (err) {
+                console.error('Failed to load session:', err);
+            }
+        }
+
+        async function handleSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('chat-input');
+            const question = input.value.trim();
+            if (!question || isStreaming) return;
+
+            removeWelcomeScreen();
+            appendMessage('user', question);
+            if (!currentSessionId) document.getElementById('chat-title').textContent = question.slice(0, 52);
+            input.value = '';
+            isStreaming = true;
+            updateSendButton();
+
+            const typingId = showTyping();
+
+            try {
+                const res = await fetch(`${API}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question, session_id: currentSessionId }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    removeTyping(typingId);
+                    appendMessage('assistant', `Warning: ${err.detail || 'Something went wrong.'}`);
+                    isStreaming = false;
+                    updateSendButton();
+                    return;
+                }
+
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder();
+                let assistantEl = null;
+                let fullText = '';
+                let buffer = '';
+
+                removeTyping(typingId);
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.startsWith('data: ')) continue;
+                        try {
+                            const data = JSON.parse(line.slice(6));
+
+                            if (data.type === 'session') {
+                                currentSessionId = data.session_id;
+                                continue;
+                            }
+
+                            if (!data.done && data.token) {
+                                if (!assistantEl) assistantEl = appendMessage('assistant', '', null, true);
+                                fullText += data.token;
+                                assistantEl.querySelector('.msg-content').innerHTML = renderMarkdown(fullText);
+                                scrollToBottom();
+                            }
+
+                            if (data.done && data.sources && data.sources.length && assistantEl) {
+                                assistantEl.querySelector('.msg-sources').innerHTML = renderSources(data.sources);
+                            }
+                        } catch (parseErr) {
+                            console.warn('Skipping malformed stream event:', parseErr);
+                        }
+                    }
+                }
+            } catch (err) {
+                removeTyping(typingId);
+                appendMessage('assistant', `Network error: ${err.message}`);
+            }
+
+            isStreaming = false;
+            updateSendButton();
+            refreshHistory();
+        }
+
+        function ensureMessageStream() {
+            const chat = document.getElementById('chat-messages');
+            let stream = chat.querySelector('[data-message-stream]');
+            if (!stream) {
+                chat.innerHTML = '<div data-message-stream class="mx-auto max-w-3xl px-4 py-8 sm:px-6"></div>';
+                stream = chat.querySelector('[data-message-stream]');
+            }
+            return stream;
+        }
+
+        function removeWelcomeScreen() {
+            const welcome = document.getElementById('welcome-screen');
+            if (welcome) {
+                document.getElementById('chat-messages').innerHTML = '<div data-message-stream class="mx-auto max-w-3xl px-4 py-8 sm:px-6"></div>';
+            }
+        }
+
+        function appendMessage(role, content, sources = null, streaming = false, target = null) {
+            const stream = target || ensureMessageStream();
+            if (!stream.hasAttribute('data-message-stream')) stream.setAttribute('data-message-stream', '');
+
+            const div = document.createElement('div');
+            const isUser = role === 'user';
+            div.className = `mb-6 flex gap-4 animate-fade-in-up ${isUser ? 'justify-end' : 'justify-start'}`;
+
+            const avatar = `
+                <div class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${isUser ? 'order-2 bg-zinc-700 text-zinc-200' : 'bg-accent-600 text-white'}">
+                    ${isUser
+                        ? '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0ZM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7Z"/></svg>'
+                        : '<svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>'}
+                </div>`;
+
+            const bubbleClass = isUser
+                ? 'bg-accent-600 text-white'
+                : 'border border-white/10 bg-shell-800 text-zinc-200';
+
+            div.innerHTML = `
+                ${avatar}
+                <div class="max-w-[min(760px,calc(100%-48px))] rounded-xl px-4 py-3 ${bubbleClass}">
+                    <div class="mb-1 text-xs font-semibold ${isUser ? 'text-orange-100' : 'text-accent-300'}">${isUser ? 'You' : 'Pocket Librarian'}</div>
+                    <div class="msg-content prose-chat text-sm leading-6 ${isUser ? 'text-white' : 'text-zinc-300'}">${content ? renderMarkdown(content) : (streaming ? '<div class="flex gap-1 py-1"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>' : '')}</div>
+                    <div class="msg-sources">${sources && sources.length ? renderSources(sources) : ''}</div>
+                </div>
+            `;
+
+            stream.appendChild(div);
+            scrollToBottom();
+            return div;
+        }
+
+        function showTyping() {
+            const stream = ensureMessageStream();
+            const id = 'typing-' + Date.now();
+            const div = document.createElement('div');
+            div.id = id;
+            div.className = 'mb-6 flex gap-4 animate-fade-in-up';
+            div.innerHTML = `
+                <div class="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent-600 text-white">
+                    <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+                </div>
+                <div class="rounded-xl border border-white/10 bg-shell-800 px-4 py-3">
+                    <div class="mb-2 text-xs font-semibold text-accent-300">Pocket Librarian</div>
+                    <div class="flex gap-1 py-1"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
+                </div>
+            `;
+            stream.appendChild(div);
+            scrollToBottom();
+            return id;
+        }
+
+        function removeTyping(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        function scrollToBottom() {
+            const chat = document.getElementById('chat-messages');
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function updateSendButton() {
+            const btn = document.getElementById('send-btn');
+            btn.disabled = isStreaming;
+        }
+
+        function renderSources(sources) {
+            return `
+                <div class="mt-3 flex flex-wrap gap-1.5 border-t border-white/10 pt-3">
+                    <span class="mr-1 text-xs text-zinc-500">Sources</span>
+                    ${sources.map(s => `<span class="rounded-full border border-accent-500/20 bg-accent-500/10 px-2 py-0.5 text-xs text-accent-200">${escapeHtml(s)}</span>`).join('')}
+                </div>
+            `;
+        }
+
+        function renderMarkdown(text) {
+            return escapeHtml(text)
+                .replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
+                .replace(/`([^`]+)`/g, '<code>$1</code>')
+                .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                .replace(/^\s*[-*]\s+(.+)/gm, '<li>$1</li>')
+                .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+                .replace(/\n{2,}/g, '</p><p>')
+                .replace(/\n/g, '<br>')
+                .replace(/^/, '<p>')
+                .replace(/$/, '</p>');
+        }
+
+        function escapeHtml(value) {
+            return String(value)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function escapeJs(value) {
+            return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '');
+        }
+
+        function formatDate(value) {
+            if (!value) return '';
+            const date = new Date(value);
+            if (Number.isNaN(date.getTime())) return '';
+            return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            refreshDocuments();
+            refreshHistory();
+        });
+    </script>
+</body>
+</html>
