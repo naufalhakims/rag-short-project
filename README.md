@@ -1,124 +1,158 @@
-# Personal Pocket Librarian
+# Pocket Librarian
 
-Personal Pocket Librarian is a local Retrieval-Augmented Generation (RAG) web app. It lets you upload text or markdown documents, stores searchable chunks in a local vector database, and answers questions using only the uploaded files.
+Ask questions about your own documents and get answers that cite their sources.
 
-The app is built with FastAPI, LangChain, ChromaDB, SQLite, Hugging Face embeddings, and Groq-hosted chat models. The frontend is a single-page HTML app served by FastAPI.
+Pocket Librarian is a local retrieval-augmented generation (RAG) web app. You upload PDF, Word, Markdown or text files; it indexes them on your machine; and a language model answers your questions using only what the documents say, with numbered citations you can click to read the passage behind each claim.
 
 ## Features
 
-- Upload `.txt`, `.md`, `.markdown`, and `.text` files.
-- Split uploaded documents into searchable chunks.
-- Store document embeddings in a persistent local ChromaDB database.
-- Ask questions through a ChatGPT-style web interface.
-- Stream assistant responses token by token with Server-Sent Events.
-- Persist chat sessions and messages in SQLite.
-- Load previous conversations from chat history.
-- Start a fresh conversation with the **New chat** button.
-- Show source filenames used for an answer.
-- Delete uploaded documents from the vector store.
+- **Grounded, cited answers.** Every claim carries a `[n]` marker linked to the exact passage it came from. If the documents do not contain the answer, the app says so.
+- **Hybrid retrieval.** Vector search and keyword search (BM25) run together, their results are fused, and a cross-encoder reranks the candidates.
+- **Conversations that follow context.** Follow-ups such as "and what about its penalties?" are rewritten into standalone search queries before retrieval.
+- **Resilient model access.** The app asks each provider which models your key can use, picks a working one if the configured model has been retired, and fails over to the next model or provider on rate limits and outages.
+- **Several providers.** Groq and Google Gemini (both have free tiers), Anthropic Claude, or any OpenAI-compatible endpoint, including local ones such as Ollama.
+- **Local retrieval models.** Embedding and reranking run on your CPU through ONNX. No GPU or PyTorch is needed, and document text is only sent to the LLM as the few passages relevant to a question.
+- **PDF, DOCX, Markdown and text** ingestion, with page numbers and section headings kept for citations.
+- **Web UI** with streaming answers, a stop button, saved conversations, per-document search scope, and drag-and-drop upload.
 
-## Architecture
+## Quick start
 
-```text
-Browser UI
-  static/index.html
-        |
-        | HTTP / SSE
-        v
-FastAPI app
-  main.py
-        |
-        +-- config.py
-        |     Loads .env values
-        |
-        +-- services/vector_service.py
-        |     Splits documents, creates embeddings, stores/retrieves Chroma vectors
-        |
-        +-- services/llm_service.py
-        |     Retrieves context, builds strict RAG prompt, streams Groq response
-        |
-        +-- database/sqlite_db.py
-        |     Stores chat sessions and messages in SQLite
-        |
-        +-- schemas/models.py
-              Defines Pydantic request/response models
+Requires Python 3.11 or newer.
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+
+copy .env.example .env            # macOS/Linux: cp .env.example .env
+# edit .env and set GROQ_API_KEY (free: https://console.groq.com/keys)
+
+python main.py
 ```
 
-## User Flow
+Open <http://127.0.0.1:8000>. The first start downloads the two retrieval models (about 150 MB) into `data/models/`; the status pill in the top right turns green when everything is ready.
 
-1. Open the web app in a browser.
-2. Upload one or more supported text documents from the sidebar.
-3. The backend validates the file, chunks it, embeds each chunk, and stores the vectors in ChromaDB.
-4. Ask a question in the chat input.
-5. The backend retrieves the most relevant chunks from uploaded documents.
-6. The retrieved context and user question are sent to Groq through LangChain.
-7. The answer streams back to the browser and is saved to chat history.
-8. Use **New chat** to reset the current session while keeping uploaded documents available.
-
-## Project Structure
-
-```text
-.
-├── main.py                  # FastAPI app, routes, upload/chat/history endpoints
-├── config.py                # Environment-driven settings
-├── logging_config.py        # Logging setup
-├── requirements.txt         # Python dependencies
-├── static/
-│   └── index.html           # Single-page web UI
-├── services/
-│   ├── llm_service.py       # Groq + LangChain streaming RAG pipeline
-│   └── vector_service.py    # ChromaDB ingestion and retrieval logic
-├── database/
-│   └── sqlite_db.py         # SQLite chat history persistence
-└── schemas/
-    └── models.py            # Pydantic API schemas
-```
+`sample_docs/` contains two short documents to try it with.
 
 ## Configuration
 
-Create a `.env` file in the project root:
+All settings live in `.env`; see [`.env.example`](.env.example) for the full list with defaults.
+
+### Language models
+
+Set a key for at least one provider. With `LLM_PROVIDER=auto` (the default) every provider that has a key is used, in the order below, and the app moves on to the next one when a request fails before any text has been produced.
+
+| Provider | Key | Default model | Notes |
+| --- | --- | --- | --- |
+| Anthropic Claude | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | Paid API. |
+| Groq | `GROQ_API_KEY` | `openai/gpt-oss-120b` | Free tier, very fast. Follow-up rewriting uses `openai/gpt-oss-20b`. |
+| Google Gemini | `GOOGLE_API_KEY` | newest `flash-lite` | Free tier. |
+| OpenAI-compatible | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | none | OpenAI, OpenRouter, Ollama, LM Studio and similar. |
+
+Set `LLM_PROVIDER=groq` (or another name) to put that provider first. Set `LLM_FALLBACK=false` to use only the first provider and its configured model.
+
+Notes:
+
+- **Groq free tier** allows 8,000 tokens per minute per model and counts the requested output size against it, so the app keeps Groq answers to 1,024 output tokens by default (`LLM_MAX_OUTPUT_TOKENS`). When one model is rate-limited the next one takes over.
+- **Claude** requests on current models opt in to Anthropic's server-side refusal fallback, so a request declined by a safety classifier is retried on Anthropic's recommended fallback model.
+
+### Retrieval
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Any dense model [fastembed](https://qdrant.github.io/fastembed/examples/Supported_Models/) supports. |
+| `RERANKER_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Any fastembed cross-encoder; `none` disables reranking. |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | `900` / `120` | Passage size in characters. Applies to new uploads. |
+| `TOP_K` / `MIN_PASSAGES` | `6` / `3` | Most and fewest passages given to the LLM once something matches. |
+| `RERANK_MIN_SCORE` | `0.005` | Relevance cut-off (0 to 1) below which a passage is not considered a match. |
+
+The defaults are tuned for English. For documents mostly in other languages, switch to a multilingual embedder and turn the English-only reranker off:
 
 ```env
-GROQ_API_KEY=your_groq_api_key_here
-GROQ_MODEL=llama-3.1-8b-instant
-CHROMA_PERSIST_DIR=./chroma_db
-SQLITE_DB_PATH=./chat_history.db
-EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
-CHUNK_SIZE=500
-CHUNK_OVERLAP=50
-COLLECTION_NAME=pocket_librarian
+EMBEDDING_MODEL=sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+RERANKER_MODEL=none
 ```
 
-`config.py` can also read a local `Groq-API.txt` fallback, but that file should never be committed.
+Changing the embedding model needs no manual step: on the next start the app notices and re-embeds your library.
 
-## Run Locally
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start the app:
-
-```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Open:
+## How it works
 
 ```text
-http://localhost:8000
+question ──► rewrite ──► retrieve ──────────────────────────► generate ──► cited answer
+             (only for    vector search ─┐                     prompt = numbered
+             follow-ups)                 ├─► fuse ─► rerank    passages + question
+                          keyword search ┘   (RRF)   (cross-encoder)
 ```
 
-The embedding model may download the first time the app starts.
+1. **Ingest.** A file is converted to text (page by page for PDFs), split into passages of about 900 characters that prefer to start at headings and overlap slightly, embedded, and stored. SQLite holds the text and a full-text index; Chroma holds the vectors.
+2. **Rewrite.** If the conversation has earlier turns, a small fast model turns the new message into a standalone search query.
+3. **Retrieve.** The query runs against the vector index and the keyword index. The two rankings are merged with reciprocal rank fusion, and a cross-encoder scores the best 12 candidates against the query.
+4. **Select.** Passages above the relevance cut-off are kept, up to six and never fewer than three. If nothing matches (a greeting, or "summarise my documents"), the opening passages of each document are sent instead so the model still knows what the library contains.
+5. **Generate.** The model receives the numbered passages and the question, and is instructed to answer only from them and cite as it goes. The answer streams to the browser; cited passages are shown underneath.
 
-## API Overview
+A conversation turn is saved only once it has an answer. Failed requests leave nothing behind, and an answer you stop midway is saved as far as it got.
 
-- `GET /` serves the frontend.
-- `POST /api/upload` uploads and ingests a document.
-- `GET /api/documents` lists uploaded documents and chunk counts.
-- `DELETE /api/documents/{filename}` deletes a document from ChromaDB.
-- `POST /api/chat` streams a RAG answer for a question.
-- `GET /api/history` lists chat sessions.
-- `GET /api/history/{session_id}` loads messages for a session.
+## Project layout
+
+```text
+main.py                  Entry point (python main.py, or uvicorn main:app)
+app/
+  main.py                FastAPI app and startup
+  api.py                 HTTP routes
+  services.py            Wires the components together
+  config.py              Settings (.env)
+  db.py                  SQLite: documents, passages, full-text index, chat history
+  ingest/
+    loaders.py           PDF, DOCX, Markdown and text to plain text
+    chunking.py          Text to passages
+  rag/
+    models.py            Local embedding and reranking models
+    index.py             Document library and Chroma vector index
+    retriever.py         Hybrid search, fusion, reranking
+    prompts.py           Prompts and citation handling
+    pipeline.py          The chat pipeline (rewrite, retrieve, generate)
+  llm/
+    router.py            Model discovery and failover across providers
+    openai_compat.py     Groq, Gemini and other OpenAI-compatible APIs
+    anthropic_provider.py  Claude
+static/                  Web UI (plain HTML, CSS and JavaScript; no build step)
+tests/                   Test suite (fake models and LLM; runs offline)
+sample_docs/             Two example documents
+data/                    Created at runtime: database, vector index, models, log
+```
+
+## API
+
+Interactive documentation is at <http://127.0.0.1:8000/docs>.
+
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/health` | Active provider and model, retrieval models, library size |
+| `GET /api/documents` | List documents |
+| `POST /api/documents` | Upload a file (multipart field `file`); a repeated file name replaces the earlier version |
+| `DELETE /api/documents/{id}` | Remove a document |
+| `GET /api/search?q=…` | Run retrieval only and return the passages with scores |
+| `POST /api/chat` | Ask a question; responds with a Server-Sent Events stream |
+| `GET /api/history` | List conversations |
+| `GET /api/history/{id}` | Messages of a conversation |
+| `DELETE /api/history/{id}` | Delete a conversation |
+
+`POST /api/chat` takes `{"question": "...", "session_id": "...", "doc_ids": ["..."]}` (the last two are optional) and streams JSON events: `session`, `status`, `sources`, `token` (repeated), then `done` or `error`.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                  # about 80 tests, no network or model downloads needed
+ruff check .
+uvicorn app.main:app --reload           # run with auto-restart on code changes
+```
+
+## Troubleshooting
+
+- **"No language model" in the status pill.** No provider key was found. Add one to `.env` and restart.
+- **"The model … is not available".** Providers retire models. Leave the model setting empty or at its default and the app chooses from what your key can access; `GET /api/health` shows what it picked.
+- **"Rate limit reached".** Free tiers are small. Wait for the time shown, or add a second provider's key so the app can fail over.
+- **A scanned PDF is rejected.** It has no text layer. Run it through OCR first.
+- **Answers miss something that is in a document.** Use `GET /api/search?q=…` to see what retrieval returns for the question. Raising `TOP_K`, or lowering `RERANK_MIN_SCORE`, sends the model more passages.
+- **Starting over.** Stop the app and delete the `data/` folder.

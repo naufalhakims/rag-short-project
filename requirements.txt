@@ -1,14 +1,18 @@
+# Web app
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
-python-dotenv==1.1.0
 python-multipart==0.0.20
-langchain==0.3.25
-langchain-groq==0.3.2
-langchain-huggingface==0.1.2
-langchain-chroma==0.2.4
-langchain-text-splitters==0.3.8
-langchain-community==0.3.24
-sentence-transformers==4.1.0
 pydantic==2.11.2
-aiosqlite==0.21.0
-aiofiles==24.1.0
+pydantic-settings==2.15.0
+
+# LLM providers
+httpx==0.28.1            # Groq, Gemini and any other OpenAI-compatible API
+anthropic==2.8.0         # Claude (optional provider)
+
+# Retrieval
+chromadb==1.5.9          # vector index
+fastembed==0.9.1         # local ONNX embedding and reranking models (no PyTorch)
+
+# Document loaders
+pypdf==7.0.1
+python-docx==1.2.0
