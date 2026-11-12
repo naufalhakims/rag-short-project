@@ -95,64 +95,17 @@ A conversation turn is saved only once it has an answer. Failed requests leave n
 ## Project layout
 
 ```text
-main.py                  Entry point (python main.py, or uvicorn main:app)
-app/
-  main.py                FastAPI app and startup
-  api.py                 HTTP routes
-  services.py            Wires the components together
-  config.py              Settings (.env)
-  db.py                  SQLite: documents, passages, full-text index, chat history
-  ingest/
-    loaders.py           PDF, DOCX, Markdown and text to plain text
-    chunking.py          Text to passages
-  rag/
-    models.py            Local embedding and reranking models
-    index.py             Document library and Chroma vector index
-    retriever.py         Hybrid search, fusion, reranking
-    prompts.py           Prompts and citation handling
-    pipeline.py          The chat pipeline (rewrite, retrieve, generate)
-  llm/
-    router.py            Model discovery and failover across providers
-    openai_compat.py     Groq, Gemini and other OpenAI-compatible APIs
-    anthropic_provider.py  Claude
-static/                  Web UI (plain HTML, CSS and JavaScript; no build step)
-tests/                   Test suite (fake models and LLM; runs offline)
-sample_docs/             Two example documents
-data/                    Created at runtime: database, vector index, models, log
+http://localhost:8000
 ```
 
-## API
+The embedding model may download the first time the app starts.
 
-Interactive documentation is at <http://127.0.0.1:8000/docs>.
+## API Overview
 
-| Method and path | Purpose |
-| --- | --- |
-| `GET /api/health` | Active provider and model, retrieval models, library size |
-| `GET /api/documents` | List documents |
-| `POST /api/documents` | Upload a file (multipart field `file`); a repeated file name replaces the earlier version |
-| `DELETE /api/documents/{id}` | Remove a document |
-| `GET /api/search?q=…` | Run retrieval only and return the passages with scores |
-| `POST /api/chat` | Ask a question; responds with a Server-Sent Events stream |
-| `GET /api/history` | List conversations |
-| `GET /api/history/{id}` | Messages of a conversation |
-| `DELETE /api/history/{id}` | Delete a conversation |
-
-`POST /api/chat` takes `{"question": "...", "session_id": "...", "doc_ids": ["..."]}` (the last two are optional) and streams JSON events: `session`, `status`, `sources`, `token` (repeated), then `done` or `error`.
-
-## Development
-
-```bash
-pip install -r requirements-dev.txt
-pytest                                  # about 80 tests, no network or model downloads needed
-ruff check .
-uvicorn app.main:app --reload           # run with auto-restart on code changes
-```
-
-## Troubleshooting
-
-- **"No language model" in the status pill.** No provider key was found. Add one to `.env` and restart.
-- **"The model … is not available".** Providers retire models. Leave the model setting empty or at its default and the app chooses from what your key can access; `GET /api/health` shows what it picked.
-- **"Rate limit reached".** Free tiers are small. Wait for the time shown, or add a second provider's key so the app can fail over.
-- **A scanned PDF is rejected.** It has no text layer. Run it through OCR first.
-- **Answers miss something that is in a document.** Use `GET /api/search?q=…` to see what retrieval returns for the question. Raising `TOP_K`, or lowering `RERANK_MIN_SCORE`, sends the model more passages.
-- **Starting over.** Stop the app and delete the `data/` folder.
+- `GET /` serves the frontend.
+- `POST /api/upload` uploads and ingests a document.
+- `GET /api/documents` lists uploaded documents and chunk counts.
+- `DELETE /api/documents/{filename}` deletes a document from ChromaDB.
+- `POST /api/chat` streams a RAG answer for a question.
+- `GET /api/history` lists chat sessions.
+- `GET /api/history/{session_id}` loads messages for a session.
