@@ -6,7 +6,8 @@
     <title>Pocket Librarian</title>
     <meta name="description" content="Ask questions about your own documents and get answers that cite their sources." />
     <meta name="color-scheme" content="dark" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ea580c'/%3E%3Cpath d='M16 9.5v14m0-14C14.6 8.6 12.7 8 10.5 8S6.4 8.6 5 9.5v14c1.4-.9 3.3-1.5 5.5-1.5s4.1.6 5.5 1.5m0-14c1.4-.9 3.3-1.5 5.5-1.5s4.1.6 5.5 1.5v14c-1.4-.9-3.3-1.5-5.5-1.5s-4.1.6-5.5 1.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23BC0202'/%3E%3Cpath d='M16 9.5v14m0-14C14.6 8.6 12.7 8 10.5 8S6.4 8.6 5 9.5v14c1.4-.9 3.3-1.5 5.5-1.5s4.1.6 5.5 1.5m0-14c1.4-.9 3.3-1.5 5.5-1.5s4.1.6 5.5 1.5v14c-1.4-.9-3.3-1.5-5.5-1.5s-4.1.6-5.5 1.5' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
     <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
@@ -89,8 +90,10 @@
             </div>
 
             <form id="composer" class="composer" autocomplete="off">
+                <div id="mention-hint" class="mention-hint" aria-live="polite" hidden></div>
                 <div class="composer-box">
-                    <textarea id="question" rows="1" placeholder="Ask about your documents…" aria-label="Your question" maxlength="4000"></textarea>
+                    <ul id="mention-menu" class="mention-menu" role="listbox" aria-label="Documents in this chat" hidden></ul>
+                    <textarea id="question" rows="1" placeholder="Ask about your documents… Type @ to pick one" aria-label="Your question" aria-autocomplete="list" aria-controls="mention-menu" maxlength="4000"></textarea>
                     <button id="send" class="send" type="submit" aria-label="Send">
                         <svg class="icon"><use id="send-icon" href="#i-send"/></svg>
                     </button>

@@ -12,6 +12,7 @@ from app.llm.base import ChatRequest, LLMError, StreamInfo
 from app.llm.router import LLMRouter
 from app.logging_config import logger
 from app.rag import prompts
+from app.rag.mentions import find_mentions
 from app.rag.retriever import RetrievalResult, Retriever
 
 _TITLE_CHARS = 60
@@ -77,6 +78,18 @@ class ChatService:
         else:
             scope = list(doc_ids or [])
         session_id = session["id"] if session else uuid.uuid4().hex
+
+        # "@paper.pdf" in the question limits this search to the tagged documents.
+        in_scope = [d for d in self._db.list_documents() if d["id"] in set(scope)]
+        mentions = find_mentions(question, in_scope)
+        query_text = question
+        if mentions.doc_ids:
+            scope = mentions.doc_ids
+            query_text = mentions.text_without or question
+        tagged = [
+            {"id": doc_id, "filename": name}
+            for doc_id, name in zip(mentions.doc_ids, mentions.filenames, strict=True)
+        ]
         # A conversation created empty (to attach documents first) is named by its
         # first question.
         title = session["title"] if session and recent else _title(question)
@@ -84,23 +97,31 @@ class ChatService:
 
         # 1. Follow-up questions ("and what about its penalties?") only make sense in
         #    context, so turn them into a standalone search query first.
-        search_query = question
+        search_query = query_text
         if history:
             yield {"type": "status", "stage": "rewriting"}
-            search_query = await self._standalone_query(question, history)
+            search_query = await self._standalone_query(query_text, history)
 
         # 2. Retrieve supporting passages (CPU-bound: keep it off the event loop).
         yield {"type": "status", "stage": "searching"}
         result = await asyncio.to_thread(self._retriever.search, search_query, scope)
         sources = source_dicts(result)
         retrieved = time.perf_counter()
-        yield {"type": "sources", "sources": sources, "mode": result.mode, "query": search_query}
+        yield {
+            "type": "sources",
+            "sources": sources,
+            "mode": result.mode,
+            "query": search_query,
+            "mentions": tagged,
+        }
 
         # 3. Generate the answer.
         yield {"type": "status", "stage": "generating"}
         request = ChatRequest(
             system=prompts.ANSWER_SYSTEM_PROMPT,
-            messages=prompts.build_answer_messages(question, result, history),
+            messages=prompts.build_answer_messages(
+                question, result, history, focus=mentions.filenames
+            ),
             temperature=self._settings.llm_temperature,
         )
         info = StreamInfo()
@@ -117,6 +138,7 @@ class ChatService:
                 "usage": info.usage,
                 "mode": result.mode,
                 "search_query": search_query if search_query != question else None,
+                "mentions": tagged,
                 "stopped": stopped,
                 "timings_ms": {
                     "retrieval": round((retrieved - started) * 1000),

@@ -151,6 +151,7 @@ def test_chat_without_documents_still_answers(client, provider):
     events = ask(client, "Who is Kaelen Voss?")
     assert by_type(events, "sources")[0] == {
         "type": "sources", "sources": [], "mode": "empty", "query": "Who is Kaelen Voss?",
+        "mentions": [],
     }
     assert events[-1]["type"] == "done"
     prompt = provider.calls[-1][1].messages[-1]["content"]

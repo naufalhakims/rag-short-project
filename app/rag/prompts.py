@@ -70,14 +70,28 @@ def format_sources(passages: Sequence[Passage]) -> str:
 
 
 def build_answer_messages(
-    question: str, result: RetrievalResult, history: Sequence[dict]
+    question: str,
+    result: RetrievalResult,
+    history: Sequence[dict],
+    focus: Sequence[str] = (),
 ) -> list[dict[str, str]]:
-    """Earlier turns (trimmed), then the question with its sources attached."""
+    """Earlier turns (trimmed), then the question with its sources attached.
+
+    `focus` names the documents the user tagged with "@"; the sources then come only
+    from those, and the model is told so.
+    """
     messages = [
         {"role": turn["role"], "content": _clip(turn["content"], _HISTORY_CHARS)}
         for turn in history
     ]
     parts = []
+    if focus:
+        names = ", ".join(f'"{name}"' for name in focus)
+        parts.append(
+            f"The user tagged {names} with @, so the sources below come only from "
+            f"{'that document' if len(focus) == 1 else 'those documents'}. Answer about "
+            f"{'it' if len(focus) == 1 else 'them'}."
+        )
     if result.mode in _NOTES:
         parts.append(_NOTES[result.mode])
     if result.passages:

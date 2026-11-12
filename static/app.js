@@ -11,6 +11,7 @@
         title: $('chat-title'), pill: $('model-pill'), modelLabel: $('model-label'), notice: $('notice'),
         messages: $('messages'), thread: $('thread'),
         composer: $('composer'), question: $('question'), send: $('send'), sendIcon: $('send-icon'),
+        mentionMenu: $('mention-menu'), mentionHint: $('mention-hint'),
     };
 
     const state = {
@@ -20,6 +21,7 @@
         library: [],           // every uploaded document
         chatDocs: [],          // the documents this chat searches
         pickerOpen: false,     // "Add from your files" list expanded
+        mention: null,         // open @-menu: { start, options, active }
         healthTimer: null,
     };
 
@@ -140,7 +142,14 @@
     // ── Messages ─────────────────────────────────────────────────
 
     function addUserMessage(text) {
-        const node = el('div', { class: 'msg user' }, el('div', { class: 'bubble' }, text));
+        const parts = [];
+        let last = 0;
+        for (const found of findMentions(text)) {
+            parts.push(text.slice(last, found.start), el('span', { class: 'mention' }, text.slice(found.start, found.end)));
+            last = found.end;
+        }
+        parts.push(text.slice(last));
+        const node = el('div', { class: 'msg user' }, el('div', { class: 'bubble' }, ...parts.filter((p) => p !== '')));
         ui.thread.append(node);
         scrollToBottom(true);
         return node;
@@ -519,6 +528,7 @@
     }
 
     function renderDocuments() {
+        updateMentionHint();   // tags depend on which documents this chat has
         // This chat's documents: removing one only takes it out of this chat.
         ui.documents.replaceChildren(...(state.chatDocs.length
             ? state.chatDocs.map((doc) => el('li', { class: 'row', title: doc.filename },
@@ -627,6 +637,137 @@
         ui.fileInput.value = '';
     }
 
+    // ── @-mentions ───────────────────────────────────────────────
+    //
+    // "@file name" in a question limits the search to that document. The server does
+    // the real matching (app/rag/mentions.py); this mirrors it for the menu, the hint
+    // and highlighting.
+
+    const stem = (filename) => filename.replace(/\.[^.\s]+$/, '');
+    const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    /** Mentions of this chat's documents in `text`: [{start, end, doc}], in order. */
+    function findMentions(text) {
+        const names = [];
+        for (const doc of state.chatDocs) {
+            names.push([doc.filename, doc]);
+            const short = stem(doc.filename);
+            if (short && short !== doc.filename) names.push([short, doc]);
+        }
+        names.sort((a, b) => b[0].length - a[0].length);
+        const found = [];
+        let masked = text;
+        for (const [name, doc] of names) {
+            const pattern = new RegExp(`@${escapeRegExp(name)}(?=$|[\\s,;:!?)\\]}"'])`, 'gi');
+            masked = masked.replace(pattern, (match, offset) => {
+                found.push({ start: offset, end: offset + match.length, doc });
+                return ' '.repeat(match.length);
+            });
+        }
+        return found.sort((a, b) => a.start - b.start);
+    }
+
+    function updateMentionHint() {
+        const docs = [...new Map(findMentions(ui.question.value).map((m) => [m.doc.id, m.doc])).values()];
+        ui.mentionHint.hidden = !docs.length;
+        if (!docs.length) return;
+        ui.mentionHint.replaceChildren('Only searching', ...docs.map((doc) => el('span', { class: 'mention-tag' }, doc.filename)));
+    }
+
+    /** The "@query" being typed just before the caret, if any. */
+    function mentionQuery() {
+        const box = ui.question;
+        if (box.selectionStart !== box.selectionEnd) return null;
+        const before = box.value.slice(0, box.selectionStart);
+        const at = before.lastIndexOf('@');
+        if (at === -1 || (at > 0 && !/\s/.test(before[at - 1]))) return null;
+        const query = before.slice(at + 1);
+        if (query.includes('\n') || query.length > 80) return null;
+        return { start: at, query };
+    }
+
+    function updateMentionMenu() {
+        const typed = mentionQuery();
+        if (!typed) return closeMentionMenu();
+        const query = typed.query.toLowerCase();
+        const options = state.chatDocs.filter((doc) => doc.filename.toLowerCase().includes(query));
+        // A space after a query that matches nothing means the user moved on.
+        if (!options.length && /\s/.test(typed.query)) return closeMentionMenu();
+        const previous = state.mention;
+        const active = previous && previous.start === typed.start ? Math.min(previous.active, Math.max(options.length - 1, 0)) : 0;
+        state.mention = { start: typed.start, options, active };
+        renderMentionMenu();
+    }
+
+    function renderMentionMenu() {
+        const { options, active } = state.mention;
+        ui.mentionMenu.hidden = false;
+        if (!state.chatDocs.length) {
+            ui.mentionMenu.replaceChildren(el('li', { class: 'mention-empty' }, 'This chat has no documents yet. Upload one or add one from your files.'));
+            return;
+        }
+        if (!options.length) {
+            ui.mentionMenu.replaceChildren(el('li', { class: 'mention-empty' }, 'No document in this chat matches.'));
+            return;
+        }
+        ui.mentionMenu.replaceChildren(
+            el('li', { class: 'menu-title', role: 'presentation' }, 'Search only in…'),
+            ...options.map((doc, index) => {
+                const option = el('li', {
+                    class: 'mention-option', role: 'option', id: `mention-${index}`,
+                    'aria-selected': String(index === active),
+                },
+                    icon('file'),
+                    el('span', { class: 'row-body' },
+                        el('span', { class: 'row-title' }, doc.filename),
+                        el('span', { class: 'row-meta' }, docMeta(doc))));
+                // mousedown, not click: keep focus (and the caret) in the question box.
+                option.addEventListener('mousedown', (event) => { event.preventDefault(); chooseMention(doc); });
+                return option;
+            }));
+        ui.question.setAttribute('aria-activedescendant', `mention-${active}`);
+        ui.mentionMenu.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+    }
+
+    function closeMentionMenu() {
+        state.mention = null;
+        ui.mentionMenu.hidden = true;
+        ui.question.removeAttribute('aria-activedescendant');
+    }
+
+    function chooseMention(doc) {
+        const box = ui.question;
+        const { start } = state.mention;
+        const insert = `@${doc.filename} `;
+        box.value = box.value.slice(0, start) + insert + box.value.slice(box.selectionStart);
+        const caret = start + insert.length;
+        box.setSelectionRange(caret, caret);
+        closeMentionMenu();
+        autoGrow();
+        updateSendButton();
+        updateMentionHint();
+        box.focus();
+    }
+
+    /** Keyboard control of the open menu. Returns true when the key was used. */
+    function handleMentionKey(event) {
+        const menu = state.mention;
+        if (!menu) return false;
+        if (event.key === 'Escape') { closeMentionMenu(); return true; }
+        if (!menu.options.length) return false;
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            menu.active = (menu.active + step + menu.options.length) % menu.options.length;
+            renderMentionMenu();
+            return true;
+        }
+        if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+            chooseMention(menu.options[menu.active]);
+            return true;
+        }
+        return false;
+    }
+
     // ── Status ───────────────────────────────────────────────────
 
     async function refreshHealth() {
@@ -697,10 +838,15 @@
         if (!question.trim()) return;
         ui.question.value = '';
         autoGrow();
+        closeMentionMenu();
+        updateMentionHint();
         send(question);
     });
-    ui.question.addEventListener('input', () => { autoGrow(); updateSendButton(); });
+    ui.question.addEventListener('input', () => { autoGrow(); updateSendButton(); updateMentionMenu(); updateMentionHint(); });
+    ui.question.addEventListener('click', updateMentionMenu);
+    ui.question.addEventListener('blur', () => setTimeout(closeMentionMenu, 120));
     ui.question.addEventListener('keydown', (event) => {
+        if (!event.isComposing && handleMentionKey(event)) { event.preventDefault(); return; }
         if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
             event.preventDefault();
             if (!state.streaming) ui.composer.requestSubmit();
