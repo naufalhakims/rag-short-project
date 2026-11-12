@@ -10,7 +10,7 @@ Pocket Librarian is a local retrieval-augmented generation (RAG) web app. You up
 - **Hybrid retrieval.** Vector search and keyword search (BM25) run together, their results are fused, and a cross-encoder reranks the candidates.
 - **Conversations that follow context.** Follow-ups such as "and what about its penalties?" are rewritten into standalone search queries before retrieval.
 - **Resilient model access.** The app asks each provider which models your key can use, picks a working one if the configured model has been retired, and fails over to the next model or provider on rate limits and outages.
-- **Several providers.** Groq and Google Gemini (both have free tiers), Anthropic Claude, or any OpenAI-compatible endpoint, including local ones such as Ollama.
+- **Runs on free models.** Groq is the default and Google Gemini is the backup; both have free tiers. Any OpenAI-compatible endpoint also works, including local models through Ollama. Anthropic Claude is supported as an optional paid provider.
 - **Local retrieval models.** Embedding and reranking run on your CPU through ONNX. No GPU or PyTorch is needed, and document text is only sent to the LLM as the few passages relevant to a question.
 - **PDF, DOCX, Markdown and text** ingestion, with page numbers and section headings kept for citations.
 - **Web UI** with streaming answers, a stop button, saved conversations, per-document search scope, and drag-and-drop upload.
@@ -40,21 +40,24 @@ All settings live in `.env`; see [`.env.example`](.env.example) for the full lis
 
 ### Language models
 
-Set a key for at least one provider. With `LLM_PROVIDER=auto` (the default) every provider that has a key is used, in the order below, and the app moves on to the next one when a request fails before any text has been produced.
+The project is set up for free models: a Groq key alone is enough, and a Google Gemini key adds a free backup. With `LLM_PROVIDER=auto` (the default) every provider that has a key is used, and the app moves on to the next one when a request fails before any text has been produced.
 
-| Provider | Key | Default model | Notes |
+| Provider | Key | Default model | Cost |
 | --- | --- | --- | --- |
-| Anthropic Claude | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | Paid API. |
 | Groq | `GROQ_API_KEY` | `openai/gpt-oss-120b` | Free tier, very fast. Follow-up rewriting uses `openai/gpt-oss-20b`. |
 | Google Gemini | `GOOGLE_API_KEY` | newest `flash-lite` | Free tier. |
-| OpenAI-compatible | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | none | OpenAI, OpenRouter, Ollama, LM Studio and similar. |
+| OpenAI-compatible | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` | none | Free when local (Ollama, LM Studio); otherwise depends on the service. |
+| Anthropic Claude | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | Paid, optional. Not needed to run the project. |
+
+If a Claude key is set, it is tried before the free providers. Leave `ANTHROPIC_API_KEY` empty to stay on free models.
 
 Set `LLM_PROVIDER=groq` (or another name) to put that provider first. Set `LLM_FALLBACK=false` to use only the first provider and its configured model.
 
 Notes:
 
 - **Groq free tier** allows 8,000 tokens per minute per model and counts the requested output size against it, so the app keeps Groq answers to 1,024 output tokens by default (`LLM_MAX_OUTPUT_TOKENS`). When one model is rate-limited the next one takes over.
-- **Claude** requests on current models opt in to Anthropic's server-side refusal fallback, so a request declined by a safety classifier is retried on Anthropic's recommended fallback model.
+- **Gemini free tier** has a daily request cap; when it runs out the app keeps using Groq.
+- **Claude** (optional) requests on current models opt in to Anthropic's server-side refusal fallback, so a request declined by a safety classifier is retried on Anthropic's recommended fallback model.
 
 ### Retrieval
 
@@ -95,17 +98,68 @@ A conversation turn is saved only once it has an answer. Failed requests leave n
 ## Project layout
 
 ```text
-http://localhost:8000
+main.py                  Entry point (python main.py, or uvicorn main:app)
+app/
+  main.py                FastAPI app and startup
+  api.py                 HTTP routes
+  services.py            Wires the components together
+  config.py              Settings (.env)
+  db.py                  SQLite: documents, passages, full-text index, chat history
+  ingest/
+    loaders.py           PDF, DOCX, Markdown and text to plain text
+    chunking.py          Text to passages
+  rag/
+    models.py            Local embedding and reranking models
+    index.py             Document library and Chroma vector index
+    retriever.py         Hybrid search, fusion, reranking
+    prompts.py           Prompts and citation handling
+    pipeline.py          The chat pipeline (rewrite, retrieve, generate)
+  llm/
+    router.py            Model discovery and failover across providers
+    openai_compat.py     Groq, Gemini and other OpenAI-compatible APIs
+    anthropic_provider.py  Claude
+static/                  Web UI (plain HTML, CSS and JavaScript; no build step)
+tests/                   Test suite (fake models and LLM; runs offline)
+sample_docs/             Two example documents
+data/                    Created at runtime: database, vector index, models, log
 ```
 
-The embedding model may download the first time the app starts.
+## API
 
-## API Overview
+Interactive documentation is at <http://127.0.0.1:8000/docs>.
 
-- `GET /` serves the frontend.
-- `POST /api/upload` uploads and ingests a document.
-- `GET /api/documents` lists uploaded documents and chunk counts.
-- `DELETE /api/documents/{filename}` deletes a document from ChromaDB.
-- `POST /api/chat` streams a RAG answer for a question.
-- `GET /api/history` lists chat sessions.
-- `GET /api/history/{session_id}` loads messages for a session.
+| Method and path | Purpose |
+| --- | --- |
+| `GET /api/health` | Active provider and model, retrieval models, library size |
+| `GET /api/documents` | List documents |
+| `POST /api/documents` | Upload a file (multipart field `file`); a repeated file name replaces the earlier version |
+| `DELETE /api/documents/{id}` | Remove a document |
+| `GET /api/search?q=…` | Run retrieval only and return the passages with scores |
+| `POST /api/chat` | Ask a question; responds with a Server-Sent Events stream |
+| `GET /api/history` | List conversations |
+| `GET /api/history/{id}` | Messages of a conversation |
+| `DELETE /api/history/{id}` | Delete a conversation |
+
+`POST /api/chat` takes `{"question": "...", "session_id": "...", "doc_ids": ["..."]}` (the last two are optional) and streams JSON events: `session`, `status`, `sources`, `token` (repeated), then `done` or `error`.
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt
+pytest                                  # about 80 tests, no network or model downloads needed
+ruff check .
+uvicorn app.main:app --reload           # run with auto-restart on code changes
+```
+
+## Troubleshooting
+
+- **"No language model" in the status pill.** No provider key was found. Add one to `.env` and restart.
+- **"The model … is not available".** Providers retire models. Leave the model setting empty or at its default and the app chooses from what your key can access; `GET /api/health` shows what it picked.
+- **"Rate limit reached".** Free tiers are small. Wait for the time shown, or add a second provider's key so the app can fail over.
+- **A scanned PDF is rejected.** It has no text layer. Run it through OCR first.
+- **Answers miss something that is in a document.** Use `GET /api/search?q=…` to see what retrieval returns for the question. Raising `TOP_K`, or lowering `RERANK_MIN_SCORE`, sends the model more passages.
+- **Starting over.** Stop the app and delete the `data/` folder.
+
+## Screenshot
+
+<img width="2880" height="1800" alt="Pocket Librarian web interface" src="https://github.com/user-attachments/assets/cdce0c18-ed3b-4558-874a-d298916c65fd" />
