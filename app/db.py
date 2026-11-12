@@ -16,7 +16,8 @@ from pathlib import Path
 
 from app.logging_config import logger
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+NEW_CHAT_TITLE = "New chat"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
@@ -56,6 +57,16 @@ CREATE TABLE IF NOT EXISTS chunks (
     page     INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_chunks_doc ON chunks(doc_id, ordinal);
+
+-- Which documents each conversation searches. A document is stored and indexed once
+-- and can be attached to any number of conversations.
+CREATE TABLE IF NOT EXISTS session_documents (
+    session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    doc_id      TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    added_at    TEXT NOT NULL,
+    PRIMARY KEY (session_id, doc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_session_documents_doc ON session_documents(doc_id);
 """
 
 # Keyword index; rowid mirrors chunks.pk. `title` holds "<file name> <section heading>".
@@ -150,6 +161,9 @@ class Database:
             except sqlite3.OperationalError as exc:  # SQLite built without FTS5
                 self.fts_enabled = False
                 logger.warning("Keyword search disabled (SQLite FTS5 unavailable): %s", exc)
+            version = conn.execute("PRAGMA user_version").fetchone()[0]
+            if 0 < version < 2:
+                _attach_cited_documents(conn)
             conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
     # ── Documents and chunks ─────────────────────────────────────
@@ -298,10 +312,64 @@ class Database:
             row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         return dict(row) if row else None
 
-    def delete_session(self, session_id: str) -> bool:
+    def create_session(self, title: str = NEW_CHAT_TITLE) -> dict:
+        """An empty conversation, so documents can be attached before the first question."""
+        now = _now()
+        session = {"id": uuid.uuid4().hex, "title": title, "created_at": now, "updated_at": now}
         with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO sessions (id, title, created_at, updated_at)"
+                " VALUES (:id, :title, :created_at, :updated_at)",
+                session,
+            )
+        return session
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete a conversation. Its documents stay in the library."""
+        with self._connect() as conn:
+            conn.execute("DELETE FROM session_documents WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
             return conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,)).rowcount > 0
+
+    def session_document_ids(self, session_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT doc_id FROM session_documents WHERE session_id = ? ORDER BY added_at",
+                (session_id,),
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def session_documents(self, session_id: str) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT d.* FROM documents d JOIN session_documents sd ON sd.doc_id = d.id"
+                " WHERE sd.session_id = ? ORDER BY d.filename COLLATE NOCASE",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def attach_documents(self, session_id: str, doc_ids: Sequence[str]) -> None:
+        now = _now()
+        with self._connect() as conn:
+            conn.executemany(
+                "INSERT OR IGNORE INTO session_documents (session_id, doc_id, added_at)"
+                " VALUES (?, ?, ?)",
+                [(session_id, doc_id, now) for doc_id in doc_ids],
+            )
+
+    def detach_document(self, session_id: str, doc_id: str) -> bool:
+        with self._connect() as conn:
+            return conn.execute(
+                "DELETE FROM session_documents WHERE session_id = ? AND doc_id = ?",
+                (session_id, doc_id),
+            ).rowcount > 0
+
+    def document_session_ids(self, doc_id: str) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT session_id FROM session_documents WHERE doc_id = ?", (doc_id,)
+            ).fetchall()
+        return [row[0] for row in rows]
 
     def get_messages(self, session_id: str, limit: int | None = None) -> list[dict]:
         """Messages of a session in chronological order (the most recent `limit`, if given)."""
@@ -333,7 +401,8 @@ class Database:
         with self._connect() as conn:
             conn.execute(
                 "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)"
-                " ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at",
+                " ON CONFLICT(id) DO UPDATE SET title = excluded.title,"
+                " updated_at = excluded.updated_at",
                 (session_id, title, now, now),
             )
             insert = (
@@ -347,6 +416,28 @@ class Database:
                  json.dumps(meta), now),
             )
         return answer_id
+
+
+def _attach_cited_documents(conn: sqlite3.Connection) -> None:
+    """Upgrade from version 1, where every conversation searched the whole library:
+    attach to each conversation the documents its answers cited, so old chats keep
+    working with the documents they were about."""
+    by_name = {row[1]: row[0] for row in conn.execute("SELECT id, filename FROM documents")}
+    links = set()
+    for session_id, sources in conn.execute(
+        "SELECT session_id, sources FROM messages WHERE role = 'assistant' AND sources IS NOT NULL"
+    ):
+        for source in json.loads(sources):
+            doc_id = source.get("doc_id") or by_name.get(source.get("filename"))
+            if doc_id in by_name.values() and source.get("cited", True):
+                links.add((session_id, doc_id))
+    now = _now()
+    conn.executemany(
+        "INSERT OR IGNORE INTO session_documents (session_id, doc_id, added_at) VALUES (?, ?, ?)",
+        [(session_id, doc_id, now) for session_id, doc_id in sorted(links)],
+    )
+    if links:
+        logger.info("Linked %d documents to existing conversations.", len(links))
 
 
 def _message(row: sqlite3.Row) -> dict:

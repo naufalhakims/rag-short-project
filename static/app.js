@@ -4,7 +4,8 @@
     const $ = (id) => document.getElementById(id);
     const ui = {
         sidebar: $('sidebar'), backdrop: $('backdrop'),
-        sessions: $('session-list'), documents: $('document-list'), scopeNote: $('scope-note'),
+        sessions: $('session-list'), documents: $('document-list'),
+        pickerToggle: $('picker-toggle'), picker: $('picker-list'),
         dropZone: $('drop-zone'), fileInput: $('file-input'), uploadHint: $('upload-hint'),
         uploadStatus: $('upload-status'),
         title: $('chat-title'), pill: $('model-pill'), modelLabel: $('model-label'), notice: $('notice'),
@@ -16,14 +17,15 @@
         sessionId: null,
         streaming: false,
         abort: null,
-        documents: [],
-        excluded: new Set(),   // ids of documents left out of the search
+        library: [],           // every uploaded document
+        chatDocs: [],          // the documents this chat searches
+        pickerOpen: false,     // "Add from your files" list expanded
         healthTimer: null,
     };
 
     const STAGES = {
         rewriting: 'Understanding the question…',
-        searching: 'Searching your library…',
+        searching: 'Searching this chat\'s documents…',
         generating: 'Writing the answer…',
     };
 
@@ -266,26 +268,30 @@
     }
 
     function showWelcome() {
-        const hasDocs = state.documents.length > 0;
+        const hasDocs = state.chatDocs.length > 0;
+        const reusable = availableToAdd().length > 0;
         const suggestions = [
             ['Summarize', 'Get the main ideas of your documents.', 'Summarize the main ideas in my documents.'],
             ['Key facts', 'Pull out names, numbers and dates.', 'What are the most important facts, figures and dates in my documents?'],
-            state.documents.length > 1
+            state.chatDocs.length > 1
                 ? ['Compare', 'See where documents agree or differ.', 'Compare my documents: where do they overlap and where do they differ?']
                 : ['Quiz me', 'Test what you remember.', 'Write five quiz questions, with answers, based on my document.'],
         ];
         ui.thread.replaceChildren(el('div', { class: 'welcome' },
             el('div', { class: 'welcome-mark' }, icon('book')),
-            el('h2', {}, 'Ask your library anything.'),
+            el('h2', {}, hasDocs ? 'Ask about this chat\'s documents.' : 'Give this chat its documents.'),
             el('p', {}, hasDocs
-                ? 'Answers come from your uploaded documents, with numbered citations you can open to check the source.'
-                : 'Add a PDF, Word, Markdown or text file to get started. Answers will come from your documents, with citations.'),
+                ? `Answers come only from the ${state.chatDocs.length === 1 ? 'document' : `${state.chatDocs.length} documents`} in this chat, with numbered citations you can open to check the source.`
+                : 'Each chat uses only its own documents, so topics never mix. Upload a PDF, Word, Markdown or text file, or reuse one you uploaded before.'),
             hasDocs
                 ? el('div', { class: 'suggestions' }, ...suggestions.map(([title, hint, prompt]) =>
                     el('button', { class: 'suggestion', type: 'button', onclick: () => send(prompt) },
                         el('strong', {}, title), el('span', {}, hint))))
-                : el('button', { class: 'btn btn-primary', type: 'button', onclick: () => ui.fileInput.click() },
-                    icon('upload'), 'Add documents'),
+                : el('div', { class: 'welcome-actions' },
+                    el('button', { class: 'btn btn-primary', type: 'button', onclick: () => ui.fileInput.click() },
+                        icon('upload'), 'Upload to this chat'),
+                    reusable ? el('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { setPicker(true); openSidebar(); } },
+                        icon('plus'), 'Add from your files') : null),
         ));
     }
 
@@ -314,11 +320,6 @@
         }
     }
 
-    function searchScope() {
-        if (!state.excluded.size) return null;
-        return state.documents.filter((d) => !state.excluded.has(d.id)).map((d) => d.id);
-    }
-
     async function send(question) {
         question = question.trim();
         if (!question || state.streaming) return;
@@ -337,8 +338,6 @@
 
         try {
             const body = { question, session_id: state.sessionId };
-            const scope = searchScope();
-            if (scope) body.doc_ids = scope;
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -394,7 +393,9 @@
     function startNewChat() {
         if (state.streaming) state.abort?.abort();
         state.sessionId = null;
+        state.chatDocs = [];
         ui.title.textContent = 'New chat';
+        renderDocuments();
         showWelcome();
         renderSessions(state.sessions || []);
         closeSidebar();
@@ -435,10 +436,16 @@
     async function openSession(session) {
         if (state.streaming) state.abort?.abort();
         try {
-            const messages = await api(`/api/history/${encodeURIComponent(session.id)}`);
+            const id = encodeURIComponent(session.id);
+            const [messages, chatDocs] = await Promise.all([
+                api(`/api/history/${id}`), api(`/api/history/${id}/documents`),
+            ]);
             state.sessionId = session.id;
+            state.chatDocs = chatDocs;
+            renderDocuments();
             ui.title.textContent = session.title || 'Chat';
             ui.thread.replaceChildren();
+            if (!messages.length) showWelcome();
             for (const item of messages) {
                 if (item.role === 'user') { addUserMessage(item.content); continue; }
                 const message = createAssistantMessage();
@@ -468,52 +475,115 @@
 
     // ── Documents ────────────────────────────────────────────────
 
+    /** Every chat has its own documents. A chat is created on the server the first time
+     *  it needs one (an upload or an added file) so documents can come before questions. */
+    async function ensureSession() {
+        if (state.sessionId) return state.sessionId;
+        const session = await api('/api/history', { method: 'POST' });
+        state.sessionId = session.id;
+        state.sessions = [session, ...(state.sessions || [])];
+        renderSessions(state.sessions);
+        return session.id;
+    }
+
+    const chatPath = () => `/api/history/${encodeURIComponent(state.sessionId)}/documents`;
+
+    function availableToAdd() {
+        const attached = new Set(state.chatDocs.map((d) => d.id));
+        return state.library.filter((d) => !attached.has(d.id));
+    }
+
     async function refreshDocuments() {
         try {
-            state.documents = await api('/api/documents');
+            const [library, chatDocs] = await Promise.all([
+                api('/api/documents'),
+                state.sessionId ? api(chatPath()) : Promise.resolve([]),
+            ]);
+            state.library = library;
+            state.chatDocs = chatDocs;
         } catch (error) {
             console.error('Could not load documents:', error);
             return;
         }
-        const ids = new Set(state.documents.map((d) => d.id));
-        state.excluded.forEach((id) => { if (!ids.has(id)) state.excluded.delete(id); });
         renderDocuments();
         if (isWelcomeShown()) showWelcome();
     }
 
+    function setPicker(open) {
+        state.pickerOpen = open;
+        renderDocuments();
+    }
+
+    function docMeta(doc) {
+        return `${doc.chunk_count} ${doc.chunk_count === 1 ? 'passage' : 'passages'}`;
+    }
+
     function renderDocuments() {
-        const docs = state.documents;
-        const included = docs.length - state.excluded.size;
-        ui.scopeNote.hidden = !state.excluded.size;
-        ui.scopeNote.textContent = `Searching ${included} of ${docs.length}`;
-        if (!docs.length) {
-            ui.documents.replaceChildren(el('li', { class: 'list-empty' }, 'No documents yet.'));
-            return;
-        }
-        ui.documents.replaceChildren(...docs.map((doc) => {
-            const checkbox = el('input', {
-                type: 'checkbox', title: 'Include in search', 'aria-label': `Search in ${doc.filename}`,
-            });
-            checkbox.checked = !state.excluded.has(doc.id);
-            checkbox.addEventListener('change', () => {
-                if (checkbox.checked) state.excluded.delete(doc.id);
-                else if (included > 1) state.excluded.add(doc.id);   // keep at least one document searchable
-                renderDocuments();
-            });
-            return el('li', { class: `row${state.excluded.has(doc.id) ? ' excluded' : ''}`, title: doc.filename },
-                checkbox,
+        // This chat's documents: removing one only takes it out of this chat.
+        ui.documents.replaceChildren(...(state.chatDocs.length
+            ? state.chatDocs.map((doc) => el('li', { class: 'row', title: doc.filename },
+                icon('file'),
                 el('span', { class: 'row-body' },
                     el('span', { class: 'row-title' }, doc.filename),
-                    el('span', { class: 'row-meta' }, `${doc.chunk_count} ${doc.chunk_count === 1 ? 'passage' : 'passages'}`)),
+                    el('span', { class: 'row-meta' }, docMeta(doc))),
                 el('button', {
-                    class: 'icon-btn row-delete', type: 'button', 'aria-label': `Delete ${doc.filename}`,
-                    onclick: () => deleteDocument(doc),
-                }, icon('trash')));
-        }));
+                    class: 'icon-btn row-delete', type: 'button', title: 'Remove from this chat',
+                    'aria-label': `Remove ${doc.filename} from this chat`, onclick: () => detachDocument(doc),
+                }, icon('close'))))
+            : [el('li', { class: 'list-empty' }, 'None yet. This chat answers only from documents you add here.')]));
+
+        // Files uploaded in other chats, ready to reuse here.
+        const available = availableToAdd();
+        ui.pickerToggle.hidden = !available.length;
+        if (!available.length) state.pickerOpen = false;
+        ui.pickerToggle.setAttribute('aria-expanded', String(state.pickerOpen));
+        ui.pickerToggle.replaceChildren(icon(state.pickerOpen ? 'close' : 'plus'),
+            state.pickerOpen ? 'Close' : `Add from your files (${available.length})`);
+        ui.picker.hidden = !state.pickerOpen;
+        if (!state.pickerOpen) return;
+        ui.picker.replaceChildren(
+            el('li', { class: 'picker-note' }, 'Files you uploaded before. Add one to use it in this chat.'),
+            ...available.map((doc) => el('li', { class: 'row', title: doc.filename },
+                el('button', {
+                    class: 'icon-btn row-add', type: 'button', title: 'Add to this chat',
+                    'aria-label': `Add ${doc.filename} to this chat`, onclick: () => attachDocument(doc),
+                }, icon('plus')),
+                el('span', { class: 'row-body' },
+                    el('span', { class: 'row-title' }, doc.filename),
+                    el('span', { class: 'row-meta' }, docMeta(doc))),
+                el('button', {
+                    class: 'icon-btn row-delete', type: 'button', title: 'Delete file everywhere',
+                    'aria-label': `Delete ${doc.filename} from all chats`, onclick: () => deleteDocument(doc),
+                }, icon('trash')))),
+        );
+    }
+
+    async function attachDocument(doc) {
+        try {
+            await ensureSession();
+            state.chatDocs = await api(chatPath(), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ doc_ids: [doc.id] }),
+            });
+        } catch (error) {
+            alert(`Could not add the file: ${error.message}`);
+        }
+        renderDocuments();
+        if (isWelcomeShown()) showWelcome();
+    }
+
+    async function detachDocument(doc) {
+        try {
+            await api(`${chatPath()}/${encodeURIComponent(doc.id)}`, { method: 'DELETE' });
+        } catch (error) {
+            alert(`Could not remove the file: ${error.message}`);
+        }
+        refreshDocuments();
     }
 
     async function deleteDocument(doc) {
-        if (!confirm(`Remove "${doc.filename}" from your library?`)) return;
+        if (!confirm(`Delete "${doc.filename}" from your files? It will be removed from every chat that uses it.`)) return;
         try {
             await api(`/api/documents/${encodeURIComponent(doc.id)}`, { method: 'DELETE' });
         } catch (error) {
@@ -523,6 +593,14 @@
     }
 
     async function uploadFiles(files) {
+        if (!files.length) return;
+        let sessionId;
+        try {
+            sessionId = await ensureSession();
+        } catch (error) {
+            alert(`Could not start a chat for these files: ${error.message}`);
+            return;
+        }
         for (const file of files) {
             const state_ = el('span', { class: 'state' });
             const name = el('span', { class: 'name' }, file.name);
@@ -531,11 +609,12 @@
             const form = new FormData();
             form.append('file', file);
             try {
-                const result = await api('/api/documents', { method: 'POST', body: form });
+                const url = `/api/documents?session_id=${encodeURIComponent(sessionId)}`;
+                const result = await api(url, { method: 'POST', body: form });
                 const count = result.document.chunk_count;
                 item.className = 'upload-item ok';
                 item.firstChild.replaceWith(icon('check'));
-                state_.textContent = { added: `${count} ${count === 1 ? 'passage' : 'passages'}`, replaced: 'Updated', unchanged: 'Already added' }[result.status];
+                state_.textContent = { added: `${count} ${count === 1 ? 'passage' : 'passages'}`, replaced: 'Updated', unchanged: 'Added to this chat' }[result.status];
                 setTimeout(() => item.remove(), 5000);
             } catch (error) {
                 item.className = 'upload-item error';
@@ -628,6 +707,7 @@
         }
     });
 
+    ui.pickerToggle.addEventListener('click', () => setPicker(!state.pickerOpen));
     ui.fileInput.addEventListener('change', () => uploadFiles([...ui.fileInput.files]));
     ui.dropZone.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); ui.fileInput.click(); }

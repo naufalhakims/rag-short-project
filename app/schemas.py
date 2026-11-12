@@ -8,7 +8,15 @@ from pydantic import BaseModel, Field
 class ChatBody(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
     session_id: str | None = Field(None, description="Continue an existing conversation")
-    doc_ids: list[str] | None = Field(None, description="Only search these documents")
+    doc_ids: list[str] | None = Field(
+        None,
+        description="Narrow the search to these documents. For a new conversation "
+        "(no session_id), these become its documents.",
+    )
+
+
+class AttachBody(BaseModel):
+    doc_ids: list[str] = Field(min_length=1, max_length=200)
 
 
 class DocumentOut(BaseModel):

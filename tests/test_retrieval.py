@@ -120,3 +120,38 @@ def test_a_few_passages_are_kept_once_something_matches(library):
     scores = [p.score for p in result.passages]
     assert scores[0] >= 0.9 and len(scores) == 3 and min(scores) < 0.9
     assert scores == sorted(scores, reverse=True)
+
+
+def test_empty_scope_searches_nothing(library):
+    """A conversation with no documents must not fall back to searching everything."""
+    result = library.retriever.search("Who is Kaelen Voss?", doc_ids=[])
+    assert result.mode == "empty" and result.passages == []
+
+
+def test_upgrade_links_old_conversations_to_the_documents_they_cited(tmp_path):
+    """Version 1 databases had no per-conversation documents; the upgrade infers them."""
+    import sqlite3
+
+    from app.db import Database
+
+    path = tmp_path / "old.db"
+    db = Database(path)
+    guide, _ = db.add_document(
+        filename="guide.txt", content_hash="a", size_bytes=1, char_count=1, chunks=[]
+    )
+    paper, _ = db.add_document(
+        filename="paper.md", content_hash="b", size_bytes=1, char_count=1, chunks=[]
+    )
+    # v1 imported answers name the file only; v2 answers carry ids and a cited flag.
+    db.save_turn(session_id="s1", title="t", question="q", answer="a", meta={},
+                 sources=[{"filename": "guide.txt", "doc_id": None, "cited": True}])
+    db.save_turn(session_id="s2", title="t", question="q", answer="a", meta={},
+                 sources=[{"filename": "paper.md", "doc_id": paper, "cited": True},
+                          {"filename": "guide.txt", "doc_id": guide, "cited": False}])
+    with sqlite3.connect(path) as conn:  # roll the database back to version 1
+        conn.execute("DELETE FROM session_documents")
+        conn.execute("PRAGMA user_version = 1")
+
+    upgraded = Database(path)
+    assert upgraded.session_document_ids("s1") == [guide]
+    assert upgraded.session_document_ids("s2") == [paper]  # uncited documents are not linked

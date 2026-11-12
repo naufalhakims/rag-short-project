@@ -6,6 +6,7 @@ Pocket Librarian is a local retrieval-augmented generation (RAG) web app. You up
 
 ## Features
 
+- **Each chat has its own documents.** A chat only searches the files added to it, so topics never mix: a question in one chat cannot pull passages from another chat's files. Files are stored once and can be reused in any chat.
 - **Grounded, cited answers.** Every claim carries a `[n]` marker linked to the exact passage it came from. If the documents do not contain the answer, the app says so.
 - **Hybrid retrieval.** Vector search and keyword search (BM25) run together, their results are fused, and a cross-encoder reranks the candidates.
 - **Conversations that follow context.** Follow-ups such as "and what about its penalties?" are rewritten into standalone search queries before retrieval.
@@ -13,7 +14,7 @@ Pocket Librarian is a local retrieval-augmented generation (RAG) web app. You up
 - **Runs on free models.** Groq is the default and Google Gemini is the backup; both have free tiers. Any OpenAI-compatible endpoint also works, including local models through Ollama. Anthropic Claude is supported as an optional paid provider.
 - **Local retrieval models.** Embedding and reranking run on your CPU through ONNX. No GPU or PyTorch is needed, and document text is only sent to the LLM as the few passages relevant to a question.
 - **PDF, DOCX, Markdown and text** ingestion, with page numbers and section headings kept for citations.
-- **Web UI** with streaming answers, a stop button, saved conversations, per-document search scope, and drag-and-drop upload.
+- **Web UI** with streaming answers, a stop button, saved conversations, a document list per chat, and drag-and-drop upload.
 
 ## Quick start
 
@@ -93,6 +94,16 @@ question ──► rewrite ──► retrieve ───────────�
 4. **Select.** Passages above the relevance cut-off are kept, up to six and never fewer than three. If nothing matches (a greeting, or "summarise my documents"), the opening passages of each document are sent instead so the model still knows what the library contains.
 5. **Generate.** The model receives the numbered passages and the question, and is instructed to answer only from them and cite as it goes. The answer streams to the browser; cited passages are shown underneath.
 
+### Documents belong to chats
+
+Every chat has its own list of documents, shown in the sidebar under "This chat's documents", and search only ever looks inside that list.
+
+- A file uploaded while a chat is open is added to that chat only. A new chat starts with no documents.
+- Each file is stored and indexed once. "Add from your files" reuses a file you uploaded in another chat without uploading it again.
+- Removing a file from a chat (the ×) keeps it for other chats. Deleting it from "Add from your files" (the bin) removes it everywhere.
+- Re-uploading a file with the same name updates it in every chat that uses it.
+- Deleting a chat keeps its files.
+
 A conversation turn is saved only once it has an answer. Failed requests leave nothing behind, and an answer you stop midway is saved as far as it got.
 
 ## Project layout
@@ -131,16 +142,20 @@ Interactive documentation is at <http://127.0.0.1:8000/docs>.
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/health` | Active provider and model, retrieval models, library size |
-| `GET /api/documents` | List documents |
-| `POST /api/documents` | Upload a file (multipart field `file`); a repeated file name replaces the earlier version |
-| `DELETE /api/documents/{id}` | Remove a document |
-| `GET /api/search?q=…` | Run retrieval only and return the passages with scores |
+| `GET /api/documents` | List every uploaded document |
+| `POST /api/documents?session_id=…` | Upload a file (multipart field `file`) and add it to that chat; a repeated file name replaces the earlier version |
+| `DELETE /api/documents/{id}` | Delete a document from every chat |
+| `GET /api/search?q=…&session_id=…` | Run retrieval only, within a chat's documents, and return the passages with scores |
 | `POST /api/chat` | Ask a question; responds with a Server-Sent Events stream |
 | `GET /api/history` | List conversations |
+| `POST /api/history` | Start an empty conversation (to add documents before the first question) |
 | `GET /api/history/{id}` | Messages of a conversation |
-| `DELETE /api/history/{id}` | Delete a conversation |
+| `DELETE /api/history/{id}` | Delete a conversation (its documents are kept) |
+| `GET /api/history/{id}/documents` | The documents a conversation searches |
+| `POST /api/history/{id}/documents` | Add uploaded documents to a conversation: `{"doc_ids": ["..."]}` |
+| `DELETE /api/history/{id}/documents/{doc_id}` | Remove a document from a conversation only |
 
-`POST /api/chat` takes `{"question": "...", "session_id": "...", "doc_ids": ["..."]}` (the last two are optional) and streams JSON events: `session`, `status`, `sources`, `token` (repeated), then `done` or `error`.
+`POST /api/chat` takes `{"question": "...", "session_id": "...", "doc_ids": ["..."]}` and streams JSON events: `session`, `status`, `sources`, `token` (repeated), then `done` or `error`. It searches only the conversation's documents. `doc_ids` is optional: for an existing conversation it narrows the search further, and without a `session_id` it sets the documents of the new conversation.
 
 ## Development
 
@@ -157,7 +172,8 @@ uvicorn app.main:app --reload           # run with auto-restart on code changes
 - **"The model … is not available".** Providers retire models. Leave the model setting empty or at its default and the app chooses from what your key can access; `GET /api/health` shows what it picked.
 - **"Rate limit reached".** Free tiers are small. Wait for the time shown, or add a second provider's key so the app can fail over.
 - **A scanned PDF is rejected.** It has no text layer. Run it through OCR first.
-- **Answers miss something that is in a document.** Use `GET /api/search?q=…` to see what retrieval returns for the question. Raising `TOP_K`, or lowering `RERANK_MIN_SCORE`, sends the model more passages.
+- **"The sources do not contain…" for something you uploaded.** The file is probably in a different chat. Add it to this one with "Add from your files".
+- **Answers miss something that is in a document.** Use `GET /api/search?q=…&session_id=…` to see what retrieval returns for the question. Raising `TOP_K`, or lowering `RERANK_MIN_SCORE`, sends the model more passages.
 - **Starting over.** Stop the app and delete the `data/` folder.
 
 ## Screenshot

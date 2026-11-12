@@ -18,8 +18,21 @@ def client(settings, services):
         yield test_client
 
 
-def upload(client, name, content):
-    return client.post("/api/documents", files={"file": (name, content)})
+def upload(client, name, content, session_id=None):
+    params = {"session_id": session_id} if session_id else {}
+    return client.post("/api/documents", files={"file": (name, content)}, params=params)
+
+
+def new_chat(client, *files):
+    """Create an empty conversation and upload (name, content) files into it."""
+    session_id = client.post("/api/history").json()["id"]
+    for name, content in files:
+        assert upload(client, name, content, session_id).status_code == 200
+    return session_id
+
+
+def chat_files(client, session_id):
+    return [d["filename"] for d in client.get(f"/api/history/{session_id}/documents").json()]
 
 
 def ask(client, question, **extra):
@@ -69,8 +82,8 @@ def test_legacy_upload_path_still_works(client):
 
 
 def test_chat_streams_a_cited_answer_and_saves_it(client, provider):
-    upload(client, "guide.txt", GUIDE)
-    events = ask(client, "Who is Kaelen Voss?")
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    events = ask(client, "Who is Kaelen Voss?", session_id=chat)
 
     assert [e["type"] for e in events[:2]] == ["session", "status"]
     sources = by_type(events, "sources")[0]
@@ -89,9 +102,10 @@ def test_chat_streams_a_cited_answer_and_saves_it(client, provider):
 
     # …and the exchange is in the history, with the cited source flagged.
     session_id = events[0]["session_id"]
+    assert session_id == chat
     sessions = client.get("/api/history").json()
     assert [s["id"] for s in sessions] == [session_id]
-    assert sessions[0]["title"] == "Who is Kaelen Voss?"
+    assert sessions[0]["title"] == "Who is Kaelen Voss?"  # "New chat" until the first question
     user, assistant = client.get(f"/api/history/{session_id}").json()
     assert (user["role"], user["content"]) == ("user", "Who is Kaelen Voss?")
     assert assistant["content"].strip() == answer
@@ -99,8 +113,8 @@ def test_chat_streams_a_cited_answer_and_saves_it(client, provider):
 
 
 def test_follow_up_is_rewritten_using_the_conversation(client, provider):
-    upload(client, "guide.txt", GUIDE)
-    first = ask(client, "Who is Kaelen Voss?")
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    first = ask(client, "Who is Kaelen Voss?", session_id=chat)
     session_id = first[0]["session_id"]
     assert not any(request.fast for _, request in provider.calls)  # nothing to rewrite yet
 
@@ -118,29 +132,116 @@ def test_follow_up_is_rewritten_using_the_conversation(client, provider):
 
 
 def test_llm_failure_is_an_error_event_and_leaves_no_history(client, provider):
-    upload(client, "guide.txt", GUIDE)
+    chat = new_chat(client, ("guide.txt", GUIDE))
     provider.errors = [LLMError("rate_limit", "slow down", provider="fake", retry_after=30)] * 2
-    events = ask(client, "Who is Kaelen Voss?")
+    events = ask(client, "Who is Kaelen Voss?", session_id=chat)
     failure = events[-1]
     assert failure["type"] == "error" and failure["code"] == "rate_limit"
     assert failure["retry_after"] == 30 and "30 seconds" in failure["message"]
-    assert client.get("/api/history").json() == []
+    assert client.get(f"/api/history/{chat}").json() == []
+
+    # A brand-new chat whose first question fails is not saved at all.
+    provider.errors = [LLMError("overloaded", "busy", provider="fake")] * 2
+    assert ask(client, "Who is Kaelen Voss?")[-1]["type"] == "error"
+    assert [s["id"] for s in client.get("/api/history").json()] == [chat]
 
 
-def test_chat_with_empty_library_still_answers(client, provider):
-    events = ask(client, "hello")
+def test_chat_without_documents_still_answers(client, provider):
+    upload(client, "guide.txt", GUIDE)  # in the library, but not in this chat
+    events = ask(client, "Who is Kaelen Voss?")
     assert by_type(events, "sources")[0] == {
-        "type": "sources", "sources": [], "mode": "empty", "query": "hello",
+        "type": "sources", "sources": [], "mode": "empty", "query": "Who is Kaelen Voss?",
     }
     assert events[-1]["type"] == "done"
-    assert "no documents yet" in provider.calls[-1][1].messages[-1]["content"]
+    prompt = provider.calls[-1][1].messages[-1]["content"]
+    assert "No documents are attached to this conversation" in prompt
+    assert "<source" not in prompt
 
 
-def test_chat_can_be_limited_to_documents(client):
-    upload(client, "guide.txt", GUIDE)
-    paper = upload(client, "paper.md", PAPER).json()["document"]
-    events = ask(client, "accuracy points penalty", doc_ids=[paper["id"]])
+def test_chat_search_can_be_narrowed_within_its_documents(client):
+    chat = new_chat(client, ("guide.txt", GUIDE), ("paper.md", PAPER))
+    paper = next(d for d in client.get("/api/documents").json() if d["filename"] == "paper.md")
+    events = ask(client, "accuracy points penalty", session_id=chat, doc_ids=[paper["id"]])
     assert {s["filename"] for s in by_type(events, "sources")[0]["sources"]} == {"paper.md"}
+
+
+def test_new_chat_via_api_gets_the_documents_it_names(client):
+    guide = upload(client, "guide.txt", GUIDE).json()["document"]
+    events = ask(client, "Who is Kaelen Voss?", doc_ids=[guide["id"]])
+    assert by_type(events, "sources")[0]["mode"] == "matched"
+    assert chat_files(client, events[0]["session_id"]) == ["guide.txt"]
+
+
+# ── Each conversation has its own documents ──────────────────────
+
+
+def test_conversations_only_search_their_own_documents(client, provider):
+    chat_a = new_chat(client, ("guide.txt", GUIDE))
+    chat_b = new_chat(client, ("paper.md", PAPER))
+
+    for chat, own, other in [(chat_a, "guide.txt", "paper.md"), (chat_b, "paper.md", "guide.txt")]:
+        # Words from both documents, so a shared search would return both.
+        events = ask(client, "Kaelen Voss consensus accuracy drones points", session_id=chat)
+        files = {s["filename"] for s in by_type(events, "sources")[0]["sources"]}
+        assert files == {own}
+        prompt = provider.calls[-1][1].messages[-1]["content"]
+        assert f'file="{own}"' in prompt and f'file="{other}"' not in prompt
+
+    # Retrieval-only search respects the scope too.
+    found = client.get("/api/search", params={"q": "Kaelen consensus", "session_id": chat_b})
+    assert {r["filename"] for r in found.json()["results"]} == {"paper.md"}
+
+
+def test_attach_and_detach_documents(client):
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    paper = upload(client, "paper.md", PAPER).json()["document"]  # library only
+    assert chat_files(client, chat) == ["guide.txt"]
+
+    attached = client.post(f"/api/history/{chat}/documents", json={"doc_ids": [paper["id"]]})
+    assert [d["filename"] for d in attached.json()] == ["guide.txt", "paper.md"]
+    client.post(f"/api/history/{chat}/documents", json={"doc_ids": [paper["id"]]})  # twice is fine
+    assert chat_files(client, chat) == ["guide.txt", "paper.md"]
+
+    assert client.delete(f"/api/history/{chat}/documents/{paper['id']}").status_code == 200
+    assert chat_files(client, chat) == ["guide.txt"]
+    assert client.delete(f"/api/history/{chat}/documents/{paper['id']}").status_code == 404
+    # Removing a file from a chat keeps it in the library.
+    assert "paper.md" in [d["filename"] for d in client.get("/api/documents").json()]
+
+    assert client.post(f"/api/history/{chat}/documents", json={"doc_ids": ["nope"]}).status_code == 404
+    assert client.get("/api/history/missing/documents").status_code == 404
+    assert upload(client, "x.txt", "x", session_id="missing").status_code == 404
+
+
+def test_same_file_in_two_chats_is_stored_once(client):
+    chat_a = new_chat(client, ("guide.txt", GUIDE))
+    chat_b = new_chat(client)
+    assert upload(client, "guide.txt", GUIDE, chat_b).json()["status"] == "unchanged"
+    assert len(client.get("/api/documents").json()) == 1
+    assert chat_files(client, chat_a) == chat_files(client, chat_b) == ["guide.txt"]
+
+
+def test_reuploading_a_file_keeps_it_in_its_chats(client):
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    replaced = upload(client, "guide.txt", GUIDE.replace("Kaelen Voss", "Mira Okafor"))
+    assert replaced.json()["status"] == "replaced"
+    attached = client.get(f"/api/history/{chat}/documents").json()
+    assert [d["id"] for d in attached] == [replaced.json()["document"]["id"]]
+    events = ask(client, "Who is Mira Okafor?", session_id=chat)
+    assert "Mira Okafor" in by_type(events, "sources")[0]["sources"][0]["text"]
+
+
+def test_deleting_a_document_removes_it_from_its_chats(client):
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    guide = client.get(f"/api/history/{chat}/documents").json()[0]
+    assert client.delete(f"/api/documents/{guide['id']}").status_code == 200
+    assert chat_files(client, chat) == []
+
+
+def test_deleting_a_chat_keeps_its_documents(client):
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    assert client.delete(f"/api/history/{chat}").status_code == 200
+    assert [d["filename"] for d in client.get("/api/documents").json()] == ["guide.txt"]
 
 
 def test_chat_validates_input(client):
@@ -151,8 +252,10 @@ def test_chat_validates_input(client):
 def test_stopping_midway_saves_the_partial_answer(services, library):
     """Closing the stream early (the Stop button) keeps what was generated so far."""
 
+    doc_ids = [d["id"] for d in services.db.list_documents()]
+
     async def run():
-        stream = services.chat.stream("Who is Kaelen Voss?")
+        stream = services.chat.stream("Who is Kaelen Voss?", doc_ids=doc_ids)
         session_id = None
         async for event in stream:
             session_id = session_id or event.get("session_id")
@@ -171,8 +274,7 @@ def test_stopping_midway_saves_the_partial_answer(services, library):
 
 
 def test_history_delete_and_missing_session(client):
-    upload(client, "guide.txt", GUIDE)
-    session_id = ask(client, "Who is Kaelen Voss?")[0]["session_id"]
+    session_id = ask(client, "Who is Kaelen Voss?", session_id=new_chat(client))[0]["session_id"]
     assert client.delete(f"/api/history/{session_id}").status_code == 200
     assert client.get(f"/api/history/{session_id}").status_code == 404
     assert client.delete(f"/api/history/{session_id}").status_code == 404
@@ -227,8 +329,8 @@ def test_fullwidth_citations_are_normalised_even_when_split_across_chunks():
 
 def test_model_citation_style_is_normalised_in_the_answer(client, provider):
     provider.reply = "Kaelen Voss is the star striker【1】."
-    upload(client, "guide.txt", GUIDE)
-    events = ask(client, "Who is Kaelen Voss?")
+    chat = new_chat(client, ("guide.txt", GUIDE))
+    events = ask(client, "Who is Kaelen Voss?", session_id=chat)
     assert "".join(e["text"] for e in by_type(events, "token")).strip().endswith("striker[1].")
     assert events[-1]["cited"] == [1]
 

@@ -109,8 +109,11 @@ class Library:
         self._index = index
         self._write_lock = threading.Lock()
 
-    def add(self, filename: str, data: bytes) -> dict:
-        """Ingest a file. Re-uploading a file name replaces the earlier version.
+    def add(self, filename: str, data: bytes, session_id: str | None = None) -> dict:
+        """Ingest a file and, if `session_id` is given, attach it to that conversation.
+
+        Re-uploading a file name replaces the earlier version; conversations that used
+        the earlier version keep the new one attached.
 
         Returns {"document": <row>, "status": "added" | "replaced" | "unchanged"}.
         Raises IngestError for problems the user can fix.
@@ -119,6 +122,8 @@ class Library:
         content_hash = hashlib.sha256(data).hexdigest()
         existing = self._db.get_document_by_filename(filename)
         if existing and existing["content_hash"] == content_hash:
+            if session_id:
+                self._db.attach_documents(session_id, [existing["id"]])
             return {"document": existing, "status": "unchanged"}
 
         blocks = load_blocks(filename, data)
@@ -131,7 +136,9 @@ class Library:
 
         with self._write_lock:
             existing = self._db.get_document_by_filename(filename)
+            sessions = [session_id] if session_id else []
             if existing:
+                sessions += self._db.document_session_ids(existing["id"])
                 self._remove(existing["id"])
             doc_id, chunk_ids = self._db.add_document(
                 filename=filename,
@@ -145,6 +152,8 @@ class Library:
             except Exception:
                 self._remove(doc_id)  # never leave a document that cannot be searched
                 raise
+            for attached in dict.fromkeys(sessions):
+                self._db.attach_documents(attached, [doc_id])
         logger.info("Ingested '%s': %d chunks.", filename, len(chunks))
         return {
             "document": self._db.get_document(doc_id),

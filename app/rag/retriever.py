@@ -31,7 +31,7 @@ class RetrievalResult:
     passages: list[Passage]
     # "matched"  — passages relevant to the query
     # "overview" — nothing matched; these are the opening sections of each document
-    # "empty"    — there is nothing in the library to search
+    # "empty"    — there is nothing to search (no documents in scope)
     mode: str
 
 
@@ -64,6 +64,10 @@ class Retriever:
     ) -> RetrievalResult:
         top_k = top_k or self._settings.top_k
         pool = self._settings.retrieval_candidates
+        if doc_ids is not None and not doc_ids:
+            # An explicit empty scope (a conversation with no documents) means there is
+            # nothing to search; it must never fall through to "search everything".
+            return RetrievalResult([], "empty")
 
         semantic = [cid for cid, _ in self._index.search(
             self._embedder.embed_query(query), pool, doc_ids

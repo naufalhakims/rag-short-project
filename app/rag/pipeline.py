@@ -54,7 +54,11 @@ class ChatService:
         session_id: str | None = None,
         doc_ids: Sequence[str] | None = None,
     ) -> AsyncIterator[dict]:
-        """Answer a question as a stream of events.
+        """Answer a question as a stream of events, searching only this conversation's
+        documents.
+
+        `doc_ids` narrows the search further for an existing conversation; for a new one
+        (no `session_id`) it sets which documents the conversation gets.
 
         Events: session, status, sources, token*, then done or error. A turn is saved
         to the chat history only once it has an answer — failures leave no trace, and
@@ -63,11 +67,19 @@ class ChatService:
         started = time.perf_counter()
         session = self._db.get_session(session_id) if session_id else None
         history: list[dict] = []
+        recent: list[dict] = []
         if session:
             recent = self._db.get_messages(session["id"], limit=4 * self._settings.history_turns)
             history = prompts.paired_history(recent, self._settings.history_turns)
+            scope = self._db.session_document_ids(session["id"])
+            if doc_ids is not None:
+                scope = [d for d in scope if d in set(doc_ids)]
+        else:
+            scope = list(doc_ids or [])
         session_id = session["id"] if session else uuid.uuid4().hex
-        title = session["title"] if session else _title(question)
+        # A conversation created empty (to attach documents first) is named by its
+        # first question.
+        title = session["title"] if session and recent else _title(question)
         yield {"type": "session", "session_id": session_id, "title": title}
 
         # 1. Follow-up questions ("and what about its penalties?") only make sense in
@@ -79,7 +91,7 @@ class ChatService:
 
         # 2. Retrieve supporting passages (CPU-bound: keep it off the event loop).
         yield {"type": "status", "stage": "searching"}
-        result = await asyncio.to_thread(self._retriever.search, search_query, doc_ids)
+        result = await asyncio.to_thread(self._retriever.search, search_query, scope)
         sources = source_dicts(result)
         retrieved = time.perf_counter()
         yield {"type": "sources", "sources": sources, "mode": result.mode, "query": search_query}
@@ -115,6 +127,8 @@ class ChatService:
                 session_id=session_id, title=title, question=question,
                 answer=answer, sources=sources, meta=meta,
             )
+            if not session and scope:
+                self._db.attach_documents(session_id, scope)
             return message_id, meta, cited
 
         try:

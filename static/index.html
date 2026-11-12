@@ -51,11 +51,10 @@
                     <ul id="session-list" class="list"></ul>
                 </section>
                 <section>
-                    <h2 class="section-title">
-                        Documents
-                        <span id="scope-note" class="scope-note" hidden></span>
-                    </h2>
+                    <h2 class="section-title">This chat's documents</h2>
                     <ul id="document-list" class="list"></ul>
+                    <button id="picker-toggle" class="link-btn picker-toggle" type="button" aria-expanded="false" hidden></button>
+                    <ul id="picker-list" class="list picker" hidden></ul>
                 </section>
             </div>
 
@@ -64,7 +63,7 @@
                     <input id="file-input" type="file" multiple hidden />
                     <svg class="icon"><use href="#i-upload"/></svg>
                     <span>
-                        <strong>Add documents</strong>
+                        <strong>Upload to this chat</strong>
                         <small id="upload-hint">PDF, Word, Markdown or text</small>
                     </span>
                 </label>

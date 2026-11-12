@@ -33,11 +33,13 @@ Output only the search query on a single line: no quotes, no explanation."""
 _NOTES = {
     "overview": (
         "No passage closely matched this message. The sources below are the opening "
-        "sections of the documents in the library, included for orientation."
+        "sections of the documents attached to this conversation, included for orientation."
     ),
     "empty": (
-        "The user's library has no documents yet. Let them know they can upload PDF, Word, "
-        "Markdown or text files from the sidebar."
+        "No documents are attached to this conversation yet, so there is nothing to answer "
+        "from. Let the user know they can upload PDF, Word, Markdown or text files from the "
+        "sidebar, or add files they uploaded earlier, and that each conversation only uses "
+        "its own documents."
     ),
 }
 _CITATION = re.compile(r"\[(\d+(?:\s*[,;]\s*\d+)*)\]")

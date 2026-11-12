@@ -132,7 +132,6 @@ ul { list-style: none; margin: 0; padding: 0; }
     text-transform: uppercase;
     color: var(--faint);
 }
-.scope-note { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--accent-text); }
 
 .list-empty { padding: 6px 8px; font-size: 13px; color: var(--faint); }
 
@@ -158,7 +157,12 @@ ul { list-style: none; margin: 0; padding: 0; }
 .row:hover .row-delete, .row:focus-within .row-delete { opacity: 1; }
 .row .row-delete:hover { color: var(--danger); background: var(--danger-soft); }
 .row input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; flex: none; cursor: pointer; }
-.row.excluded .row-title { color: var(--faint); text-decoration: line-through; }
+.row .row-add { width: 28px; height: 28px; color: var(--accent-text); }
+.row .row-add:hover { background: var(--accent-soft); color: var(--accent); }
+
+.picker-toggle { margin: 6px 8px 0; }
+.picker { margin-top: 6px; padding: 4px; border-radius: var(--radius); border: 1px dashed var(--border-strong); }
+.picker-note { padding: 4px 6px 6px; font-size: 11.5px; color: var(--faint); }
 
 .upload { padding: 12px; border-top: 1px solid var(--border); }
 .drop-zone {
@@ -270,6 +274,7 @@ ul { list-style: none; margin: 0; padding: 0; }
 .welcome h2 { margin: 0; font-size: 28px; font-weight: 650; letter-spacing: -0.02em; }
 .welcome p { max-width: 480px; margin: 10px 0 0; color: var(--muted); }
 .welcome .btn { margin-top: 22px; }
+.welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
 .suggestions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; width: 100%; margin-top: 30px; }
 .suggestion {
     padding: 14px;
