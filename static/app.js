@@ -55,8 +55,63 @@
         return svg;
     }
 
+    // ── Login (only when the server has a password) ──────────────
+
+    const TOKEN_KEY = 'pocket-librarian-token';
+    let authToken = '';
+    try { authToken = localStorage.getItem(TOKEN_KEY) || ''; } catch { /* storage blocked */ }
+
+    class AuthError extends Error {}
+
+    function withAuth(options = {}) {
+        if (!authToken) return options;
+        return { ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${authToken}` } };
+    }
+
+    function showLogin(message = '') {
+        const login = $('login');
+        const error = $('login-error');
+        error.textContent = message;
+        error.hidden = !message;
+        if (login.hidden) {
+            login.hidden = false;
+            $('login-password').value = '';
+            setTimeout(() => $('login-password').focus(), 0);
+        }
+    }
+
+    $('login-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const button = $('login-submit');
+        button.disabled = true;
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password: $('login-password').value }),
+            });
+            if (!response.ok) {
+                showLogin(response.status === 401 ? 'Wrong password. Try again.' : await errorDetail(response));
+                $('login-password').select();
+                return;
+            }
+            authToken = (await response.json()).token || '';
+            try { localStorage.setItem(TOKEN_KEY, authToken); } catch { /* stays signed in until reload */ }
+            $('login').hidden = true;
+            loadApp();
+        } catch {
+            showLogin('Could not reach the server.');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
     async function api(path, options) {
-        const response = await fetch(path, options);
+        const response = await fetch(path, withAuth(options));
+        if (response.status === 401) {
+            showLogin();
+            throw new AuthError('Please log in.');
+        }
         if (!response.ok) throw new Error(await errorDetail(response));
         return response.json();
     }
@@ -347,13 +402,17 @@
 
         try {
             const body = { question, session_id: state.sessionId };
-            const response = await fetch('/api/chat', {
+            const response = await fetch('/api/chat', withAuth({
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
                 signal: state.abort.signal,
-            });
-            if (!response.ok) {
+            }));
+            if (response.status === 401) {
+                showLogin();
+                message.fail('Your session ended. Log in, then try again.', retry);
+                settled = true;
+            } else if (!response.ok) {
                 message.fail(await errorDetail(response), retry);
                 settled = true;
             } else {
@@ -775,7 +834,8 @@
         let health;
         try {
             health = await api('/api/health');
-        } catch {
+        } catch (error) {
+            if (error instanceof AuthError) return;   // the login screen takes over
             setPill('bad', 'Server unreachable', 'The app server is not responding.');
             state.healthTimer = setTimeout(refreshHealth, 5000);
             return;
@@ -869,10 +929,14 @@
     window.addEventListener('dragover', (event) => event.preventDefault());
     window.addEventListener('drop', (event) => event.preventDefault());
 
+    function loadApp() {
+        refreshDocuments();
+        refreshSessions();
+        refreshHealth();
+        ui.question.focus();
+    }
+
     showWelcome();
     updateSendButton();
-    refreshDocuments();
-    refreshSessions();
-    refreshHealth();
-    ui.question.focus();
+    loadApp();
 })();

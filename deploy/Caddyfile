@@ -1,0 +1,21 @@
+# Caddy obtains and renews the HTTPS certificate for {$DOMAIN} automatically.
+{$DOMAIN} {
+	encode gzip
+
+	# Uploads up to the app's own limit (MAX_UPLOAD_MB, 25 MB by default) plus headroom.
+	request_body {
+		max_size 30MB
+	}
+
+	reverse_proxy app:7860 {
+		# Stream answers to the browser as they are written, without buffering.
+		flush_interval -1
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+}

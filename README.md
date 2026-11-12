@@ -7,6 +7,7 @@ Pocket Librarian is a local retrieval-augmented generation (RAG) web app. You up
 ## Features
 
 - **Each chat has its own documents.** A chat only searches the files added to it, so topics never mix: a question in one chat cannot pull passages from another chat's files. Files are stored once and can be reused in any chat.
+- **Tag documents with @.** Type `@` in a question to pick one of the chat's documents; that question then searches only the tagged documents.
 - **Grounded, cited answers.** Every claim carries a `[n]` marker linked to the exact passage it came from. If the documents do not contain the answer, the app says so.
 - **Hybrid retrieval.** Vector search and keyword search (BM25) run together, their results are fused, and a cross-encoder reranks the candidates.
 - **Conversations that follow context.** Follow-ups such as "and what about its penalties?" are rewritten into standalone search queries before retrieval.
@@ -104,7 +105,35 @@ Every chat has its own list of documents, shown in the sidebar under "This chat'
 - Re-uploading a file with the same name updates it in every chat that uses it.
 - Deleting a chat keeps its files.
 
+### Asking about a specific document with @
+
+Type `@` in the question box to open a list of the chat's documents, then pick one with the mouse, or with the arrow keys and Enter or Tab. Tag as many as you like. While any document is tagged, that question searches only the tagged documents; untagged questions search all of the chat's documents as usual.
+
+- A tag is `@` plus the file name, with or without its extension: `@paper.pdf` or `@paper`. Names with spaces work.
+- A tag on its own is enough for broad requests: "summarise @paper" sends the opening of that document.
+- Tags only reach the chat's own documents. A name that matches nothing is treated as ordinary text.
+- The same rule applies to `POST /api/chat`; the `sources` event lists the tagged documents under `mentions`.
+
 A conversation turn is saved only once it has an answer. Failed requests leave nothing behind, and an answer you stop midway is saved as far as it got.
+
+## Deploy to a server
+
+The repository includes everything needed to run the app on a Linux server with Docker:
+
+- `Dockerfile`: builds the app with the retrieval models inside the image.
+- `docker-compose.yml`: runs the app next to [Caddy](https://caddyserver.com), which serves it over HTTPS with a free, automatically renewed certificate. Documents and chats are kept in a Docker volume, so they survive restarts and updates.
+- `deploy/ORACLE.md`: a step-by-step guide for Oracle Cloud's **Always Free** Arm server, from creating the account to updating and backing up.
+
+The short version, on a server with Docker and ports 80 and 443 open:
+
+```bash
+git clone https://github.com/naufalhakims/rag-short-project.git pocket-librarian
+cd pocket-librarian
+# create .env with GROQ_API_KEY, APP_PASSWORD and DOMAIN (see deploy/ORACLE.md)
+docker compose up -d --build
+```
+
+**Always set `APP_PASSWORD` on a public server.** Without it, anyone who finds the address can read, upload and delete documents and use up your API quota.
 
 ## Project layout
 
@@ -113,6 +142,7 @@ main.py                  Entry point (python main.py, or uvicorn main:app)
 app/
   main.py                FastAPI app and startup
   api.py                 HTTP routes
+  auth.py                Optional password login
   services.py            Wires the components together
   config.py              Settings (.env)
   db.py                  SQLite: documents, passages, full-text index, chat history
@@ -124,6 +154,7 @@ app/
     index.py             Document library and Chroma vector index
     retriever.py         Hybrid search, fusion, reranking
     prompts.py           Prompts and citation handling
+    mentions.py          @-tags that limit a question to specific documents
     pipeline.py          The chat pipeline (rewrite, retrieve, generate)
   llm/
     router.py            Model discovery and failover across providers

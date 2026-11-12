@@ -3,7 +3,7 @@
 import threading
 from dataclasses import dataclass, field
 
-from app.config import Settings
+from app.config import PROJECT_ROOT, Settings
 from app.db import Database
 from app.llm.router import LLMRouter, build_router
 from app.logging_config import logger
@@ -49,10 +49,34 @@ def build_services(
     return Services(settings, db, embedder, reranker, library, retriever, llm, chat)
 
 
+SAMPLE_DIR = PROJECT_ROOT / "sample_docs"
+SAMPLE_CHAT_TITLE = "Sample: Gravity Ball and a research paper"
+
+
+def seed_sample_documents(services: Services) -> int:
+    """Put the sample documents in an empty library, in a chat of their own.
+
+    Used on hosts whose disk is wiped on restart (such as a free Hugging Face Space), so
+    a visitor always finds something to try. Does nothing if the library has documents.
+    """
+    if services.db.list_documents() or not SAMPLE_DIR.is_dir():
+        return 0
+    files = sorted(f for f in SAMPLE_DIR.iterdir() if f.is_file())
+    if not files:
+        return 0
+    session = services.db.create_session(SAMPLE_CHAT_TITLE)
+    for path in files:
+        services.library.add(path.name, path.read_bytes(), session["id"])
+    logger.info("Added %d sample documents.", len(files))
+    return len(files)
+
+
 def warm_up(services: Services) -> None:
     """Load the local models and repair the vector index, off the request path."""
     try:
         services.library.sync_index()
+        if services.settings.seed_sample_docs:
+            seed_sample_documents(services)
         services.embedder.embed_query("warm up")
         if services.reranker:
             services.reranker.score("warm up", ["warm up"])

@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api import router as api_router
+from app.auth import router as auth_router
 from app.config import PROJECT_ROOT, Settings, get_settings
 from app.logging_config import logger, setup_logging
 from app.services import Services, build_services, warm_up
@@ -61,6 +62,7 @@ def create_app(settings: Settings | None = None, services: Services | None = Non
         logger.error("Unhandled error on %s %s", request.method, request.url.path, exc_info=exc)
         return JSONResponse({"detail": "Internal server error."}, status_code=500)
 
+    app.include_router(auth_router)
     app.include_router(api_router)
     app.mount("/static", RevalidatedStaticFiles(directory=STATIC_DIR), name="static")
 

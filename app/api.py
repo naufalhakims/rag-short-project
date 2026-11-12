@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import StreamingResponse
 
+from app.auth import require_login
 from app.ingest.loaders import SUPPORTED_EXTENSIONS, IngestError
 from app.logging_config import logger
 from app.rag.pipeline import source_dicts
@@ -21,7 +22,8 @@ from app.schemas import (
 )
 from app.services import Services
 
-router = APIRouter(prefix="/api")
+# Every route here needs a login when APP_PASSWORD is set (see app/auth.py).
+router = APIRouter(prefix="/api", dependencies=[Depends(require_login)])
 
 
 def get_services(request: Request) -> Services:

@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     rerank_min_score: float = 0.005
     history_turns: int = 3  # previous exchanges given to the LLM
 
+    # ── Access ───────────────────────────────────────────────────
+    # Set a password to require a login (do this on any public server).
+    app_password: str = ""
+    session_days: int = 30
+    # Add the files in sample_docs/ to an empty library on startup, in their own chat.
+    seed_sample_docs: bool = False
+
     # ── Storage ──────────────────────────────────────────────────
     data_dir: Path = PROJECT_ROOT / "data"
     model_dir: Path | None = None  # where local models are cached; default <data_dir>/models

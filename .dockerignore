@@ -1,0 +1,17 @@
+# Keep secrets, local data and tooling out of the image.
+.env
+.env.*
+!.env.example
+.git
+.venv
+venv
+data
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+*.log
+tests
+requirements-dev.txt
+.vscode
+.idea

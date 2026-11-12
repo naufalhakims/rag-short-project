@@ -1,0 +1,43 @@
+# Run Pocket Librarian on a server, with automatic HTTPS.
+#
+#   docker compose up -d --build
+#
+# Needs a .env file next to this one (see deploy/ORACLE.md). Two containers:
+#   app    — the app itself, reachable only from caddy
+#   caddy  — the public web server: gets a free HTTPS certificate for DOMAIN from
+#            Let's Encrypt and forwards requests to the app
+
+services:
+  app:
+    build: .
+    image: pocket-librarian
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # A server keeps its data, so sample documents are not needed.
+      SEED_SAMPLE_DOCS: "false"
+    volumes:
+      # Documents, chats and the search index live here and survive rebuilds.
+      - librarian-data:/home/user/data
+    expose:
+      - "7860"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env, for example 203-0-113-7.sslip.io}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  librarian-data:
+  caddy-data:
+  caddy-config:
